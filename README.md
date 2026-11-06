@@ -120,7 +120,7 @@ You are a C# developer who has shipped web APIs, perhaps read part of Evans, and
 
 ## Read it
 
-- **Download** the PDF (812 pages, with a clickable outline), the EPUB, or the single-page HTML from the [latest release](https://github.com/snow-jallen/ddd-actors-dotnet/releases/latest). Every push to `main` also refreshes the [latest build](https://github.com/snow-jallen/ddd-actors-dotnet/releases/tag/latest-build).
+- **Download** the PDF (800+ pages, with a clickable outline), the EPUB, or the single-page HTML from the [latest release](https://github.com/snow-jallen/ddd-actors-dotnet/releases/latest). Every push to `main` also refreshes the [latest build](https://github.com/snow-jallen/ddd-actors-dotnet/releases/tag/latest-build).
 - **Browse** the Markdown in [`book/`](book/) right here on GitHub, where the diagrams render inline.
 - **Follow along** with the sample: `git clone --recurse-submodules https://github.com/snow-jallen/ddd-actors-dotnet.git`.
 
