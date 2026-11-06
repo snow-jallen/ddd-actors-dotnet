@@ -1,0 +1,19 @@
+diff --git a/tests/Ohmline.Telemetry.Tests/JournalTraceTests.cs b/tests/Ohmline.Telemetry.Tests/JournalTraceTests.cs
+index ffbb93b..9628f96 100644
+--- a/tests/Ohmline.Telemetry.Tests/JournalTraceTests.cs
++++ b/tests/Ohmline.Telemetry.Tests/JournalTraceTests.cs
+@@ -68,12 +68,12 @@ public sealed class JournalTraceTests(ITestOutputHelper output)
+ 
+     /// <summary>
+     /// A counter that has recovered, and its total: it stores an untraced <c>Added(0)</c> to
+-    /// say so.
++    /// say so. Unnamed: the name of an incarnation just stopped can still be taken.
+     /// </summary>
+     private async Task<(IActorRef Counter, int Total)> StartedAsync(string persistenceId)
+     {
+         var counter = Sys.ActorOf(
+-            Props.Create(() => new Counter(persistenceId)), persistenceId);
++            Props.Create(() => new Counter(persistenceId)));
+         return (counter, await counter.Ask<int>(new Add(0), RemainingOrDefault, Ct));
+     }
+ 

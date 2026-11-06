@@ -1,0 +1,13 @@
+diff --git a/tests/Ohmline.SiteEnergy.Api.Tests/SiteEnergyEndpointsTests.cs b/tests/Ohmline.SiteEnergy.Api.Tests/SiteEnergyEndpointsTests.cs
+index 8244f03..8f406ef 100644
+--- a/tests/Ohmline.SiteEnergy.Api.Tests/SiteEnergyEndpointsTests.cs
++++ b/tests/Ohmline.SiteEnergy.Api.Tests/SiteEnergyEndpointsTests.cs
+@@ -31,7 +31,7 @@ public sealed class SiteEnergyEndpointsTests(ITestOutputHelper output)
+ 
+     private static readonly IOptions<SiteEnergyApiOptions> Options =
+         Microsoft.Extensions.Options.Options.Create(
+-            new SiteEnergyApiOptions { AskTimeout = TimeSpan.FromMilliseconds(500) });
++            new SiteEnergyApiOptions { AskTimeout = TimeSpan.FromSeconds(3) });
+ 
+     private static readonly SiteRequest Site = new(
+         "slc-depot",

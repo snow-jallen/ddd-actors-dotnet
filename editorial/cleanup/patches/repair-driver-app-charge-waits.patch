@@ -1,0 +1,19 @@
+diff --git a/tests/Ohmline.IntegrationTests/DriverAppTests.cs b/tests/Ohmline.IntegrationTests/DriverAppTests.cs
+index 32df534..5b046a2 100644
+--- a/tests/Ohmline.IntegrationTests/DriverAppTests.cs
++++ b/tests/Ohmline.IntegrationTests/DriverAppTests.cs
+@@ -130,8 +130,12 @@ public sealed class DriverAppTests(PostgresFixture postgres)
+         (await http.PostAsJsonAsync("/tariffs", Sessions.Tariff, Ct)).EnsureSuccessStatusCode();
+         var started = await http.PostAsJsonAsync(
+             "/sessions", Sessions.Start(session, $"{chargePoint}/1", token), Ct);
+-        (await http.GetAsync(started.Headers.Location, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
+-        await RowAsync( // Its own stream, which may be a little behind the history's.
++        started.StatusCode.ShouldBe(HttpStatusCode.Accepted);
++        // Each read model is a stream of its own, and on a node that has just started they may
++        // all still be starting: longer than read-your-writes waits for the history.
++        await RowAsync(
++            "SELECT status FROM read_models.session_history WHERE session_id = @id", session);
++        await RowAsync(
+             "SELECT status FROM read_models.driver_app_cards WHERE session_id = @id", session);
+         return (chargePoint, token, session);
+     }

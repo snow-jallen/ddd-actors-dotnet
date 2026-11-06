@@ -1,0 +1,123 @@
+diff --git a/tools/Ohmline.Simulator/Driver.cs b/tools/Ohmline.Simulator/Driver.cs
+index cb00f67..f387d92 100644
+--- a/tools/Ohmline.Simulator/Driver.cs
++++ b/tools/Ohmline.Simulator/Driver.cs
+@@ -1,3 +1,4 @@
++using System.Net;
+ using System.Net.Http.Json;
+ 
+ namespace Ohmline.Simulator;
+@@ -9,6 +10,10 @@ namespace Ohmline.Simulator;
+ /// </summary>
+ public sealed class Driver(HttpClient node)
+ {
++    private const int Attempts = 3;
++
++    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(1);
++
+     public async Task SetUpAsync(
+         string chargePointId, string siteId, string tokenUid, CancellationToken cancellationToken)
+     {
+@@ -76,12 +81,31 @@ public sealed class Driver(HttpClient node)
+         return current ?? "unknown";
+     }
+ 
++    /// <summary>
++    /// Posts a command. A 504 says the command may still have been carried out, so the driver
++    /// sends it again with the same Idempotency-Key, as the problem's detail asks: a node that
++    /// has just started can take longer than its ask timeout over its first commands.
++    /// </summary>
+     private async Task<HttpResponseMessage> PostAsync(
+         string path, object body, CancellationToken cancellationToken)
+     {
+-        var answer = await node.PostAsJsonAsync(path, body, cancellationToken);
+-        answer.EnsureSuccessStatusCode();
+-        return answer;
++        var idempotencyKey = Guid.CreateVersion7().ToString();
++        for (var attempt = 1; ; attempt++)
++        {
++            using var request = new HttpRequestMessage(HttpMethod.Post, path)
++            {
++                Content = JsonContent.Create(body),
++            };
++            request.Headers.Add("Idempotency-Key", idempotencyKey);
++            var answer = await node.SendAsync(request, cancellationToken);
++            if (answer.StatusCode is not HttpStatusCode.GatewayTimeout || attempt == Attempts)
++            {
++                answer.EnsureSuccessStatusCode();
++                return answer;
++            }
++
++            await Task.Delay(RetryDelay, cancellationToken);
++        }
+     }
+ 
+     private sealed record JourneyAnswer(string Step);
+diff --git a/tools/Ohmline.Simulator/SimulatedCharger.cs b/tools/Ohmline.Simulator/SimulatedCharger.cs
+index 356462d..6ef9abf 100644
+--- a/tools/Ohmline.Simulator/SimulatedCharger.cs
++++ b/tools/Ohmline.Simulator/SimulatedCharger.cs
+@@ -15,6 +15,10 @@ namespace Ohmline.Simulator;
+ /// </summary>
+ public sealed class SimulatedCharger(string chargePointId) : IAsyncDisposable
+ {
++    private const int Attempts = 3;
++
++    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(1);
++
+     private readonly ClientWebSocket _socket = new();
+     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _calls = new();
+     private readonly SemaphoreSlim _sending = new(1, 1);
+@@ -43,9 +47,30 @@ public sealed class SimulatedCharger(string chargePointId) : IAsyncDisposable
+         _receiving = ReceiveAllAsync(_stopping.Token);
+     }
+ 
+-    /// <summary>Calls the gateway and waits for its answer's payload.</summary>
++    /// <summary>
++    /// Calls the gateway and waits for its answer's payload. An <c>InternalError</c> means that
++    /// Charging did not answer the gateway in time and the gateway undid the call, so the
++    /// charger sends it again, as chargers retry what the central system failed to process.
++    /// </summary>
+     public async Task<JsonElement> CallAsync<T>(
+         string action, T payload, CancellationToken cancellationToken)
++    {
++        for (var attempt = 1; ; attempt++)
++        {
++            try
++            {
++                return await CallOnceAsync(action, payload, cancellationToken);
++            }
++            catch (GatewayCallError error)
++                when (error.ErrorCode == "InternalError" && attempt < Attempts)
++            {
++                await Task.Delay(RetryDelay, cancellationToken);
++            }
++        }
++    }
++
++    private async Task<JsonElement> CallOnceAsync<T>(
++        string action, T payload, CancellationToken cancellationToken)
+     {
+         var id = $"{chargePointId}-{Interlocked.Increment(ref _nextId)}";
+         var answer = NewSignal<JsonElement>();
+@@ -118,8 +143,7 @@ public sealed class SimulatedCharger(string chargePointId) : IAsyncDisposable
+                 answer.TrySetResult(result.Payload);
+                 break;
+             case CallError error when _calls.TryRemove(error.MessageId, out var answer):
+-                answer.TrySetException(new InvalidOperationException(
+-                    $"The gateway answered {error.ErrorCode}: {error.Description}"));
++                answer.TrySetException(new GatewayCallError(error.ErrorCode, error.Description));
+                 break;
+             case Call call:
+                 await SendAsync(
+@@ -167,3 +191,10 @@ public sealed class SimulatedCharger(string chargePointId) : IAsyncDisposable
+     private static TaskCompletionSource<T> NewSignal<T>() =>
+         new(TaskCreationOptions.RunContinuationsAsynchronously);
+ }
++
++/// <summary>The gateway answered a call with a <c>CallError</c>.</summary>
++public sealed class GatewayCallError(string errorCode, string description)
++    : InvalidOperationException($"The gateway answered {errorCode}: {description}")
++{
++    public string ErrorCode => errorCode;
++}

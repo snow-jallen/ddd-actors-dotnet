@@ -1,0 +1,34 @@
+diff --git a/learn/Ch02.Hosted.Tests/ChargerAppTests.cs b/learn/Ch02.Hosted.Tests/ChargerAppTests.cs
+index 58a0d46..e3aa609 100644
+--- a/learn/Ch02.Hosted.Tests/ChargerAppTests.cs
++++ b/learn/Ch02.Hosted.Tests/ChargerAppTests.cs
+@@ -1,6 +1,9 @@
+ using System.Net;
+ using System.Net.Http.Json;
++using Akka;
++using Akka.Actor;
+ using Microsoft.AspNetCore.Builder;
++using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging;
+ 
+ namespace Ch02.Hosted.Tests;
+@@ -64,6 +67,19 @@ public sealed class ChargerAppTests : IAsyncLifetime
+     [Fact]
+     public async Task Given_a_running_host_when_it_stops_then_coordinated_shutdown_drains_first()
+     {
++        // Akka.NET's logger is an actor that stops with the actor system and sends any line it
++        // has not handled yet to stdout instead. Hold back termination until the line is through.
++        CoordinatedShutdown.Get(_app.Services.GetRequiredService<ActorSystem>()).AddTask(
++            CoordinatedShutdown.PhaseBeforeActorSystemTerminate,
++            "wait-for-the-drain-log-line",
++            () =>
++            {
++                SpinWait.SpinUntil(
++                    () => _logs.Messages.Any(m => m.Contains("draining charger twins")),
++                    TimeSpan.FromSeconds(5));
++                return Task.FromResult(Done.Instance);
++            });
++
+         await _app.StopAsync(TestContext.Current.CancellationToken);
+ 
+         _logs.Messages.ShouldContain(m => m.Contains("draining charger twins"));

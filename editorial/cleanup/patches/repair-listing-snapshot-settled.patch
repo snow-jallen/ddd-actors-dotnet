@@ -1,0 +1,55 @@
+diff --git a/tests/Ohmline.Charging.Actors.Tests/Listings/ChargePointListingActorTests.cs b/tests/Ohmline.Charging.Actors.Tests/Listings/ChargePointListingActorTests.cs
+index 102df59..d9cdd8f 100644
+--- a/tests/Ohmline.Charging.Actors.Tests/Listings/ChargePointListingActorTests.cs
++++ b/tests/Ohmline.Charging.Actors.Tests/Listings/ChargePointListingActorTests.cs
+@@ -1,4 +1,5 @@
+ using Akka.Actor;
++using Akka.Persistence;
+ using Akka.Persistence.TestKit;
+ using Microsoft.Extensions.Time.Testing;
+ using Ohmline.Charging.Actors.Listings;
+@@ -65,12 +66,11 @@ public sealed class ChargePointListingActorTests(ITestOutputHelper output)
+     {
+         var first = Start();
+         await AcceptAsync(first, Revise("Depot", "Level -1"), version: 1);
++        await SettledAsync(version: 1);
+         await AcceptAsync(first, Revise("Depot", "Level -2"), version: 2);
++        await SettledAsync(version: 2);
+         await AcceptAsync(first, Revise("Depot, public bays", "Level -2, bays 14-19"), 3);
+-        await AwaitAssertAsync(
+-            async () => (await JournalProbe.EventsAsync<ChargePointListingEvent>(
+-                Sys, PersistenceId, Ct)).ShouldBeEmpty(),
+-            cancellationToken: Ct);
++        await SettledAsync(version: 3);
+         await WatchAsync(first);
+         Sys.Stop(first);
+         await ExpectTerminatedAsync(first, cancellationToken: Ct);
+@@ -89,6 +89,28 @@ public sealed class ChargePointListingActorTests(ITestOutputHelper output)
+         await AcceptAsync(second, Revise("Depot, public bays", "Level -3"), version: 4);
+     }
+ 
++    /// <summary>
++    /// Waits until the revision's snapshot round is over: its events deleted and the snapshots
++    /// before it gone. The test kit's in-memory snapshot store can lose a snapshot that is saved
++    /// while an older one is being deleted (errata, Chapter 13), so the test lets each round
++    /// finish before it sends the next revision.
++    /// </summary>
++    private Task SettledAsync(long version) =>
++        AwaitAssertAsync(
++            async () =>
++            {
++                (await JournalProbe.EventsAsync<ChargePointListingEvent>(Sys, PersistenceId, Ct))
++                    .ShouldBeEmpty();
++                var store = Akka.Persistence.Persistence.Instance.Apply(Sys).SnapshotStoreFor(null);
++                var before = new SnapshotSelectionCriteria(maxSequenceNr: version - 1);
++                var older = await store.Ask<LoadSnapshotResult>(
++                    new LoadSnapshot(PersistenceId, before, long.MaxValue),
++                    TimeSpan.FromSeconds(3),
++                    Ct);
++                older.Snapshot.ShouldBeNull();
++            },
++            cancellationToken: Ct);
++
+     private IActorRef Start() => Sys.ActorOf(ChargePointListingActor.Props(Charger, _clock));
+ 
+     private static ReviseChargePointListing Revise(string name, string access) =>

@@ -1,0 +1,44 @@
+diff --git a/tests/Ohmline.DeviceGateway.Tests/GatewayDrainTests.cs b/tests/Ohmline.DeviceGateway.Tests/GatewayDrainTests.cs
+index 9feff07..6aefb16 100644
+--- a/tests/Ohmline.DeviceGateway.Tests/GatewayDrainTests.cs
++++ b/tests/Ohmline.DeviceGateway.Tests/GatewayDrainTests.cs
+@@ -1,6 +1,7 @@
+ using System.Net.WebSockets;
+ using Microsoft.AspNetCore.Hosting;
+ using Microsoft.AspNetCore.Mvc.Testing;
++using Microsoft.Extensions.DependencyInjection;
+ using Ohmline.DeviceGateway.Connections;
+ using Ohmline.DeviceGateway.Ocpp.Frames;
+ 
+@@ -30,6 +31,7 @@ public sealed class GatewayDrainTests : IAsyncDisposable
+             ConnectAsync("OHM-SLC-0041"),
+             ConnectAsync("OHM-SLC-0042"),
+             ConnectAsync("OHM-SLC-0043"));
++        (await RecordedAsync(chargers.Length)).ShouldBe(chargers.Length);
+ 
+         var stopping = _gateway.DisposeAsync().AsTask();
+         var closes = await Task.WhenAll(chargers.Select(CloseFrameAsync));
+@@ -51,6 +53,23 @@ public sealed class GatewayDrainTests : IAsyncDisposable
+             new Uri(_gateway.Server.BaseAddress, $"ocpp/{chargePointId}"), Ct);
+     }
+ 
++    /// <summary>
++    /// How many connections the gateway has recorded, once it has <paramref name="expected"/>
++    /// or after ten seconds. A charger's handshake completes before the gateway records its
++    /// connection, and a drain closes only the connections it knows of.
++    /// </summary>
++    private async Task<int> RecordedAsync(int expected)
++    {
++        var open = _gateway.Services.GetRequiredService<OpenConnections>();
++        using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(10));
++        while (open.Current.Count < expected && !patience.IsCancellationRequested)
++        {
++            await Task.Delay(TimeSpan.FromMilliseconds(10), Ct);
++        }
++
++        return open.Current.Count;
++    }
++
+     /// <summary>Waits for the gateway's close frame and answers it, as a charger would.</summary>
+     private static async Task<(WebSocketCloseStatus? Status, string? Description)> CloseFrameAsync(
+         WebSocket charger)

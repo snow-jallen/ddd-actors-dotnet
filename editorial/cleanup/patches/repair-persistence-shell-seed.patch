@@ -1,0 +1,50 @@
+diff --git a/tests/Ohmline.Testing/PersistenceShellSpec.cs b/tests/Ohmline.Testing/PersistenceShellSpec.cs
+index 80abb94..7563314 100644
+--- a/tests/Ohmline.Testing/PersistenceShellSpec.cs
++++ b/tests/Ohmline.Testing/PersistenceShellSpec.cs
+@@ -93,16 +93,13 @@ public abstract class PersistenceShellSpec(
+ 
+         private async Task SeedAsync()
+         {
+-            if (_history.IsEmpty)
+-            {
+-                return;
+-            }
+-
++            // Seeds even an empty history: the seeder's recovery starts the journal and the
++            // snapshot store, so the actor under test does not pay for that within its reply.
+             var seeder = _kit.Sys.ActorOf(Props.Create(() => new Seeder(_persistenceId)));
+             await seeder.Ask<Seeded>(new Seed(_history), Timeout, Ct);
+             await _kit.WatchAsync(seeder);
+             _kit.Sys.Stop(seeder);
+-            await _kit.ExpectTerminatedAsync(seeder, cancellationToken: Ct);
++            await _kit.ExpectTerminatedAsync(seeder, Timeout, cancellationToken: Ct);
+         }
+     }
+ 
+@@ -190,7 +187,11 @@ public abstract class PersistenceShellSpec(
+         }
+     }
+ 
+-    private static TimeSpan Timeout => TimeSpan.FromSeconds(3 * ActorTestConfig.TimeFactor);
++    /// <summary>
++    /// For the seeding only: the first write of a fresh actor system starts its journal, which
++    /// takes seconds on a machine running the whole suite.
++    /// </summary>
++    private static TimeSpan Timeout => TimeSpan.FromSeconds(20 * ActorTestConfig.TimeFactor);
+ 
+     /// <summary>Persists the history under the persistence id, all at once, and says so.</summary>
+     private sealed class Seeder : ReceivePersistentActor
+@@ -201,6 +202,12 @@ public abstract class PersistenceShellSpec(
+             Command<Seed>(seed =>
+             {
+                 var replyTo = Sender;
++                if (seed.History.IsEmpty)
++                {
++                    replyTo.Tell(Seeded.Instance); // Recovered: the journal is up.
++                    return;
++                }
++
+                 PersistAll(seed.History, _ => { }, () => replyTo.Tell(Seeded.Instance));
+             });
+         }

@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Verify >= 33 build-time SponsorCheck: this is a non-revenue open-source sample -->
+    <Verify_SponsorshipExemption>OpenSource</Verify_SponsorshipExemption>
+    <Verify_SponsorshipExemptionUntil>2027-10</Verify_SponsorshipExemptionUntil>
+  </PropertyGroup>
+</Project>

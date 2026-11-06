@@ -1,0 +1,11 @@
+﻿[
+  {
+    CartId: c1,
+    Sku: {
+      Value: PEAR
+    },
+    Qty: {
+      Value: 3
+    }
+  }
+]

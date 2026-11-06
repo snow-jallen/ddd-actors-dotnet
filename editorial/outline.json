@@ -1,0 +1,1621 @@
+{
+  "domain": "Ohmline, a fictional public EV-charging network (a charge point operator). Ohmline runs about 300 charging sites (public car parks, workplaces and a bus depot), each with several charge points made by different vendors that talk to Ohmline over a simplified OCPP-1.6J-style JSON-over-WebSocket protocol. Drivers start a charge with an RFID card or the driver app (a .NET MAUI app that is its own bounded context, downstream of the server's Open Host Service, queuing commands offline and caching read models); Ohmline must keep every site under the power limit of its grid connection (minus any curtailment the grid operator requests), price each session from the tariff locked at its start (time-of-use bands in site-local time, session fee, idle fee after a grace period), and take payment through a pre-authorize/capture/void payment provider. The core domain (Charging: ChargePoint, ChargingSession and the ChargingJourney process manager; Site Energy: SitePowerBudget and its fair-share allocator) has real, quantitative, time-dependent invariants; supporting contexts are Tariffs (a Knowledge Level), Driver Accounts (token uniqueness) and Billing (deliberately plain CRUD with an outbox, no actors); the Device Gateway is the anticorruption layer to the chargers. External systems are all fictional and simulated in the sample: TallyPay (payment provider, ugly API), Northgate Grid (grid operator demand-response feed), AssetTrack (a legacy asset registry exported as messy CSV: the Big Ball of Mud) and a roaming hub (Conformist / Separate Ways, documentation only). Charge points are long-lived, connected, timer-driven devices and every session, site and token is a natural single-writer entity, which makes the domain a natural fit for sharded persistent actors.",
+  "chapters": [
+    {
+      "number": 1,
+      "part": "Part I: First Principles",
+      "slug": "why-ddd-and-actors",
+      "title": "Taming Complexity: Why Domain-Driven Design Meets the Actor Model",
+      "wordTarget": 5500,
+      "summary": "Explains why domain complexity, consistency and concurrency are one problem; introduces Ohmline; sets out the book's stance (functional core, actor shell); bootstraps the sample repo and the .NET 11 workbench.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Essential versus accidental complexity",
+          "summary": "Brooks; where software actually gets hard; why many failed microservice efforts are modeling failures; the cost of CRUD thinking.",
+          "codeTag": null,
+          "codeChange": ""
+        },
+        {
+          "number": 2,
+          "title": "Meet Ohmline: one charge, told end to end",
+          "summary": "Walks one RFID charge from plug-in to receipt to introduce sites, charge points, connectors, sessions, tariffs, grid limits and payment holds. Why this domain and not e-commerce.",
+          "codeTag": "ch01-s02",
+          "codeChange": "git init the sample repo (branch main). Add README.md (what the repo is, how tags map to book sections, `git diff chNN-sMM chNN-sMM` usage), LICENSE (MIT), .gitignore (dotnet template + .idea/.vs + TestResults), .gitattributes (* text=auto eol=lf), docs/ohmline-primer.md (domain primer with a mermaid diagram of one site: grid connection, 3 charge points, 2 connectors each)."
+        },
+        {
+          "number": 3,
+          "title": "Models, language and the people who know the business",
+          "summary": "Model-Driven Design, Ubiquitous Language, Hands-on Modelers, Refactoring Toward Deeper Insight and Continuous Integration in Evans's sense; previews why 'events are forever' changes what deeper insight costs.",
+          "codeTag": "ch01-s03",
+          "codeChange": "Add docs/glossary.md (table: Term | Context | Meaning) seeded with ~10 terms from the style guide glossary; docs/adr/template.md; docs/adr/0000-record-architecture-decisions.md."
+        },
+        {
+          "number": 4,
+          "title": "Consistency without distributed transactions",
+          "summary": "Pat Helland's 'Life Beyond Distributed Transactions': entities are atomically updatable, activities track partners; why 2PC does not scale; the single-writer principle.",
+          "codeTag": "ch01-s04",
+          "codeChange": "Add docs/adr/0001-single-writer-per-aggregate.md."
+        },
+        {
+          "number": 5,
+          "title": "Actors as the runtime for consistency boundaries",
+          "summary": "Hewitt's model (send, create, become), mailbox as the lock, location transparency; first look at the DDD-to-Akka mapping table (aggregate = sharded persistent actor, repository = shard region, process manager = actor with timers, ACL = translating actor); what actors do not give you: a model.",
+          "codeTag": null,
+          "codeChange": ""
+        },
+        {
+          "number": 6,
+          "title": "Functional core, actor shell",
+          "summary": "Bernhardt's functional core / imperative shell plus Chassaing's Decider (Decide: State x Command -> Events | Error; Evolve: State x Event -> State); what lives where; honest trade-offs.",
+          "codeTag": "ch01-s06",
+          "codeChange": "Add docs/adr/0002-functional-core-actor-shell.md and docs/vision.md (first-draft Domain Vision Statement for Ohmline)."
+        },
+        {
+          "number": 7,
+          "title": "Setting up the workbench",
+          "summary": "Installs the .NET 11 SDK (11.0.100-rc.3 go-live), explains global.json (SDK pin plus the Microsoft.Testing.Platform runner, without which `dotnet test` fails on .NET 11), Central Package Management, Directory.Build.props, .slnx, Podman/Docker, the Aspire CLI, and how to follow along with tags.",
+          "codeTag": "ch01-s07",
+          "codeChange": "Add global.json (sdk 11.0.100-rc.3.26522.148, rollForward latestFeature, allowPrerelease true; test.runner Microsoft.Testing.Platform), Directory.Build.props (net11.0, Nullable, ImplicitUsings, TreatWarningsAsErrors, LangVersion default, NuGetAudit false, Deterministic, ContinuousIntegrationBuild under CI), Directory.Packages.props (ManagePackageVersionsCentrally, AkkaVersion=1.5.73 property, empty item groups by area), Directory.Build.targets (empty placeholder), .editorconfig, NuGet.config (nuget.org only with packageSourceMapping), empty Ohmline.slnx, tools/verify-tags.sh (checks out every chNN-sMM tag in order into a worktree and runs `dotnet build -warnaserror` + `dotnet test --solution Ohmline.slnx`)."
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "part": "Part I: First Principles",
+      "slug": "actors-from-first-principles",
+      "title": "Actors from First Principles",
+      "wordTarget": 7000,
+      "summary": "Builds an actor by hand on System.Threading.Channels to show there is no magic, then ports it to Akka.NET 1.5.73 and tours the core toolkit (Props, Tell/Ask, Become/Stash, timers, supervision, PipeTo vs ReceiveAsync, Akka.Hosting, coordinated shutdown, the TestKit). All code lives in learn/ projects: no product code is written before the domain is modeled.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Shared mutable state: double-booking a connector",
+          "summary": "A racy Connector class lets two sessions start on one connector; a deterministic Barrier-based test proves it; a System.Threading.Lock fix works but does not scale to a whole design. Brief first look at xUnit v3 on Microsoft.Testing.Platform (depth in ch09).",
+          "codeTag": "ch02-s01",
+          "codeChange": "Add learn/Directory.Build.props (imports root; IsPackable false). Add learn/Ch02.ActorsByHand (classlib: RacyConnector, LockedConnector) and learn/Ch02.ActorsByHand.Tests (xunit.v3 4.0.2, Shouldly 4.3.0; OutputType Exe) with DoubleBookingTests. Add tests/Directory.Build.props-style test settings for learn tests (OutputType Exe, global Using Xunit and Shouldly). Add xunit.v3 and Shouldly to Directory.Packages.props. Add projects to Ohmline.slnx under /learn/."
+        },
+        {
+          "number": 2,
+          "title": "A mailbox in sixty lines",
+          "summary": "A Mailbox<TMessage> on an unbounded single-reader Channel; a ConnectorActor processes immutable record messages one at a time; the race disappears.",
+          "codeTag": "ch02-s02",
+          "codeChange": "Add Mailbox<TMessage> (Channel.CreateUnbounded with SingleReader=true, a processing loop) and ConnectorActor with record messages (StartSession, EndSession) to learn/Ch02.ActorsByHand; tests prove only one session wins under concurrency."
+        },
+        {
+          "number": 3,
+          "title": "Tell, don't ask: reply addresses and futures",
+          "summary": "Reply-to addresses in messages; an AskAsync helper on TaskCompletionSource with a mandatory timeout; why fire-and-forget is the default.",
+          "codeTag": "ch02-s03",
+          "codeChange": "Add ReplyTo<T> delegate/address type and AskAsync extension (TaskCompletionSource + CancellationTokenSource timeout, TimeoutException) to Ch02.ActorsByHand; tests for reply and timeout."
+        },
+        {
+          "number": 4,
+          "title": "Let it crash: supervision and addresses by hand",
+          "summary": "A parent loop restarts a crashed child and its state is lost (setting up persistence); an ActorDirectory keyed by ConnectorId previews 'repository = lookup by identity' and sharding.",
+          "codeTag": "ch02-s04",
+          "codeChange": "Add Supervisor (restarts a crashed ConnectorActor) and ActorDirectory (ConcurrentDictionary<string, ConnectorActor> get-or-create) to Ch02.ActorsByHand; test shows state reset after a crash."
+        },
+        {
+          "number": 5,
+          "title": "Hello, Akka.NET",
+          "summary": "ActorSystem, Props, ReceiveActor, Tell, Ask with an explicit timeout (the default is infinite); the same connector in Akka; Akka.Analyzers (AK1000 'never new an actor'); the first TestKit test.",
+          "codeTag": "ch02-s05",
+          "codeChange": "Add Akka (1.5.73 via $(AkkaVersion)), Akka.TestKit.Xunit to CPM. Add learn/Ch02.AkkaBasics.Tests (actors defined inside the test project): AkkaConnectorActor (ReceiveActor) and tests using TestKit (ExpectMsgAsync, Ask with TimeSpan timeout)."
+        },
+        {
+          "number": 6,
+          "title": "Behaviour as state: Become and Stash",
+          "summary": "A ChargerTwin that stashes everything until BootNotification, then switches between Available, Charging and Faulted behaviours with Become.",
+          "codeTag": "ch02-s06",
+          "codeChange": "Add ChargerTwin (ReceiveActor, IWithStash; behaviours Booting/Available/Charging/Faulted; records BootNotification, StatusChanged, GetStatus) and tests to Ch02.AkkaBasics.Tests."
+        },
+        {
+          "number": 7,
+          "title": "Time inside actors",
+          "summary": "IWithTimers, timer keys, a heartbeat watchdog that marks the charger offline after three missed heartbeats; AK1004.",
+          "codeTag": "ch02-s07",
+          "codeChange": "Add heartbeat watchdog to ChargerTwin (Timers.StartPeriodicTimer with key 'heartbeat-check', MissedHeartbeats counter, ChargerWentOffline published to parent) plus TestKit tests using short intervals."
+        },
+        {
+          "number": 8,
+          "title": "Supervision, backoff and the async question",
+          "summary": "OneForOneStrategy deciders; BackoffSupervisor with auto-reset; PipeTo plus a loading behaviour for I/O versus ReceiveAsync (which suspends the mailbox until the task completes; Sender is stable across await).",
+          "codeTag": "ch02-s08",
+          "codeChange": "Add FirmwareCatalogClient fake (Task-returning), FirmwareLookupActor using PipeTo + Become(Loading) + Stash, a BackoffSupervisor.Props(BackoffOptions.OnFailure(...).WithAutoReset(...)) example, and a test demonstrating ReceiveAsync blocking the mailbox (messages queue until the await completes)."
+        },
+        {
+          "number": 9,
+          "title": "Actors in the Generic Host",
+          "summary": "Akka.Hosting: AddAkka, WithActors, ActorRegistry, IRequiredActor<T>, WithActorAskTimeout, logging through Microsoft.Extensions.Logging, coordinated shutdown when the host stops.",
+          "codeTag": "ch02-s09",
+          "codeChange": "Add Akka.Hosting to CPM. Add learn/Ch02.Hosted (Microsoft.NET.Sdk.Web minimal API): AddAkka(\"learn\", ...) registering ChargerTwin via WithActors + registry.Register<ChargerTwin>, GET /chargers/{id}/status endpoint using IRequiredActor<ChargerTwin> and Ask with timeout, a CoordinatedShutdown task in phase before-service-unbind that logs 'draining'."
+        },
+        {
+          "number": 10,
+          "title": "What actors do not give you: a model",
+          "summary": "Bridge to DDD: the actor solved concurrency and failure, but nothing above tells us what a charge point is, what the rules are, or where boundaries go.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "part": "Part I: First Principles",
+      "slug": "csharp-15-modeling-toolkit",
+      "title": "The C# 15 Modeling Toolkit",
+      "wordTarget": 7000,
+      "summary": "Teaches the language features the book relies on through learning tests: records and the field keyword, C# 15 unions and closed hierarchies, exhaustiveness as a build error, a Result union, static abstract members and generic math, extension members and indexers, patterns, TimeProvider and Guid v7, and the serialization reality of unions versus closed records (including the Akka mailbox and Newtonsoft gotchas). Product code starts in Ohmline.SharedKernel.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Learning tests: pinning down a language",
+          "summary": "Why a learning-test project is the right way to explore a brand-new language version; tour of the LanguageLab project.",
+          "codeTag": "ch03-s01",
+          "codeChange": "Add learn/Ch03.LanguageLab.Tests (xunit.v3, Shouldly, Microsoft.Extensions.TimeProvider.Testing 10.11.0 added to CPM) with RecordEqualityTests (value equality, with-expressions, record struct vs record class)."
+        },
+        {
+          "number": 2,
+          "title": "Records, with, and validation with the field keyword",
+          "summary": "A readonly record struct whose field-backed init validates both construction and with-expressions; default(T) bypasses validation.",
+          "codeTag": "ch03-s02",
+          "codeChange": "Add FieldKeywordTests: readonly record struct Kilowatts with `public decimal Value { get; init => field = value >= 0 ? value : throw new ArgumentOutOfRangeException(...); }`; tests for ctor, with, and default(Kilowatts) bypass."
+        },
+        {
+          "number": 3,
+          "title": "Union types: closed sets of existing types",
+          "summary": "Declaring unions, lowering (struct with object? Value, IUnion, [Union]), implicit conversions, exhaustive switch expressions, the default(union) trap, non-chaining conversions (CS0029), patterns that do not reach nested unions (CS8121), ToString; making CS8509/CS8655 build errors.",
+          "codeTag": "ch03-s03",
+          "codeChange": "Add UnionTests with `public union ConnectorStatus(Available, Occupied, Faulted);` (case records in the test file), exhaustive switch, default(ConnectorStatus) throwing SwitchExpressionException, null-arm handling; non-compiling CS0029/CS8121 examples kept in a `#if DEMO_COMPILE_ERRORS` block. Edit root Directory.Build.props: `<WarningsAsErrors>$(WarningsAsErrors);CS8509;CS8655;nullable</WarningsAsErrors>`."
+        },
+        {
+          "number": 4,
+          "title": "Closed hierarchies and the union-versus-closed decision",
+          "summary": "closed record hierarchies give exhaustiveness across assemblies (sealed leaves; CS9381/CS9382/CS9384); a plain abstract record still needs a discard arm; the decision table that becomes house style.",
+          "codeTag": "ch03-s04",
+          "codeChange": "Add learn/Ch03.ClosedLib (classlib with `public closed record ChargerCommand` and sealed leaves) referenced by LanguageLab; ClosedHierarchyTests show cross-assembly exhaustiveness and the abstract-record contrast. Add docs/adr/0003-unions-vs-closed-records.md (closed records for anything sent between actors, persisted or put on the wire; unions for in-process state, decisions, errors, results, effects and multi-source inputs)."
+        },
+        {
+          "number": 5,
+          "title": "Errors as values: a Result union",
+          "summary": "union Result<T,E>(Ok<T>, Err<E>) with Map, Bind and Match as a OneOf replacement; Unit; one explicit hop because conversions do not chain.",
+          "codeTag": "ch03-s05",
+          "codeChange": "Create src/Ohmline.SharedKernel (classlib, no package references) with Result.cs: `public union Result<T, E>(Ok<T>, Err<E>);`, `public sealed record Ok<T>(T Value)`, `public sealed record Err<E>(E Error)`, static Result helpers, extension members Map/Bind/Match/IsOk; Unit.cs. Create tests/Directory.Build.props (OutputType Exe, IsPackable false, global usings Xunit, Shouldly; references xunit.v3 + Shouldly) and tests/Ohmline.SharedKernel.Tests with ResultTests. Add both to the slnx (/src, /tests)."
+        },
+        {
+          "number": 6,
+          "title": "Static abstract members and generic math",
+          "summary": "IValueObject<TSelf,TValue> with static abstract TryCreate and a static virtual Create; generic-math operator interfaces for quantities.",
+          "codeTag": "ch03-s06",
+          "codeChange": "Add IValueObject<TSelf,TValue> (static abstract `Result<TSelf, ValidationError> TryCreate(TValue)`, static virtual `TSelf Create(TValue)` that throws on Err) and a placeholder `ValidationError` record to SharedKernel; LanguageLab GenericMathTests with IAdditionOperators on a quantity."
+        },
+        {
+          "number": 7,
+          "title": "Extension members and extension indexers",
+          "summary": "C# 14 extension blocks (properties, static members, operators) and C# 15 extension indexers; preview of a typed IActorRef.Send that forces callers through a protocol union.",
+          "codeTag": "ch03-s07",
+          "codeChange": "Add ExtensionMemberTests to LanguageLab: `extension(decimal v) { public Kilowatts kW => new(v); }`, an extension static factory, an extension operator, and an extension indexer over an ImmutableArray of readings; a commented preview of `extension(IActorRef self) { public void Send(ChargerProtocol msg) => self.Tell(msg.Value); }`."
+        },
+        {
+          "number": 8,
+          "title": "Patterns that read like rules; time and identity",
+          "summary": "List patterns over meter histories, property patterns, labeled break, collection expressions with with(...) arguments; TimeProvider and FakeTimeProvider; Guid.CreateVersion7(clock.GetUtcNow()).",
+          "codeTag": "ch03-s08",
+          "codeChange": "Add PatternTests and TimeTests to LanguageLab; add SharedKernel/Identity/GuidV7.cs (`public static Guid New(TimeProvider clock) => Guid.CreateVersion7(clock.GetUtcNow());`) with a test in Ohmline.SharedKernel.Tests."
+        },
+        {
+          "number": 9,
+          "title": "Serialization reality check: unions and closed records on the wire and in the mailbox",
+          "summary": "System.Text.Json writes a union as the bare case (object cases are ambiguous on read, SYSLIB1227; [JsonUnion(TypeClassifier=...)] fixes simple cases); closed records need [JsonPolymorphic(InferClosedTypePolymorphism=true)] or explicit [JsonDerivedType] or derived fields are silently dropped; Akka sends the case not the union (Receive<Case> versus Receive<Union>); Akka 1.5's Newtonsoft default round-trips a union with Value == null. The house rules.",
+          "codeTag": "ch03-s09",
+          "codeChange": "Add SerializationRealityTests to LanguageLab (STJ union write/read, JsonUnion classifier, closed record with and without InferClosedTypePolymorphism) and AkkaUnionTests (Akka.TestKit.Xunit: Tell of a union is received as the union struct; serialize-messages round trip shows Value == null). Add docs/house-style.md summarizing the rules (link to ADR 0003)."
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "part": "Part II: Strategic Design",
+      "slug": "discovering-the-domain",
+      "title": "Discovering the Domain: Storytelling and EventStorming",
+      "wordTarget": 6000,
+      "summary": "Goes from conversations to a compile-checked vocabulary: Domain Storytelling, Big Picture / Process / Design-Level EventStorming, the ubiquitous language with durable names, subdomain classification and choosing a business-logic pattern per subdomain. Every section commits a real modeling artifact to docs/.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Domain Storytelling with Ohmline's people",
+          "summary": "Numbered pictographic stories: a driver charges with an RFID card; the grid operator curtails the bus depot; a payment fails after charging. Warning: a story 'actor' is a person or system role, not an Akka actor.",
+          "codeTag": "ch04-s01",
+          "codeChange": "Add docs/domain-stories/01-rfid-charge.md, 02-depot-curtailment.md, 03-failed-capture.md (numbered steps plus mermaid sequence diagrams)."
+        },
+        {
+          "number": 2,
+          "title": "Big Picture EventStorming",
+          "summary": "Chaotic exploration, enforcing the timeline, pivotal events (SessionStarted, SessionEnded, CurtailmentRequested, PaymentCaptured), hotspots.",
+          "codeTag": "ch04-s02",
+          "codeChange": "Add docs/eventstorming/big-picture.md (mermaid timeline, color legend, pivotal events, hotspot list)."
+        },
+        {
+          "number": 3,
+          "title": "Process-Level EventStorming",
+          "summary": "Commands (blue), policies (lilac, 'whenever X then Y'), external systems (pink: chargers, TallyPay, Northgate Grid), read models (green) for 'start charging' and 'settle a session'.",
+          "codeTag": "ch04-s03",
+          "codeChange": "Add docs/eventstorming/process-start-charging.md and process-settle-session.md."
+        },
+        {
+          "number": 4,
+          "title": "Design-Level EventStorming and the sticky-to-code map",
+          "summary": "Aggregates emerge (ChargePoint, ChargingSession, SitePowerBudget, IdToken) and the mapping table: orange event -> event record, blue command -> command record, yellow aggregate -> persistent entity actor, lilac policy -> process manager or subscriber, green read model -> projection, pink external system -> ACL.",
+          "codeTag": "ch04-s04",
+          "codeChange": "Add docs/eventstorming/design-level.md including the sticky-to-code mapping table."
+        },
+        {
+          "number": 5,
+          "title": "Ubiquitous language: glossary, naming rules and durable vocabulary",
+          "summary": "Per-context glossary ('transaction' in OCPP versus 'session' in Charging versus a money movement in Billing); imperative commands, past-tense events, banned names (UpdateX, SetStatus, *Manager); shard type names, PersistenceId prefixes and manifests are permanent.",
+          "codeTag": "ch04-s05",
+          "codeChange": "Expand docs/glossary.md per context; add docs/naming-rules.md."
+        },
+        {
+          "number": 6,
+          "title": "From stickies to types: the vocabulary compiles",
+          "summary": "The glossary becomes code: empty closed command and event hierarchies whose names come straight from the design-level board.",
+          "codeTag": "ch04-s06",
+          "codeChange": "Create src/Charging/Ohmline.Charging.Contracts (classlib, references Ohmline.SharedKernel only) with ChargePoints/ChargePointCommand.cs (closed record with sealed, still-empty leaves: RegisterChargePoint, ReserveConnector, OccupyConnector, ReleaseConnector, ReportConnectorFault ...) and src/Charging/Ohmline.Charging.Domain (references SharedKernel and Charging.Contracts) with ChargePoints/ChargePointEvent.cs (ChargePointRegistered, ConnectorReserved, ConnectorOccupied, ConnectorReleased, ConnectorFaulted ...). Add both to slnx under /src/Charging. Commands live in Contracts because other contexts (the gateway, the journey) send them; events stay inside the Domain."
+        },
+        {
+          "number": 7,
+          "title": "Subdomains: core, supporting, generic",
+          "summary": "Khononov's heuristics (competitive advantage, complexity, volatility, build versus buy), the Bounded Context Canvas business-model role and Wardley evolution; site power allocation as the differentiator.",
+          "codeTag": "ch04-s07",
+          "codeChange": "Add docs/subdomains.md (table: subdomain, type, evolution stage, build/buy, rationale)."
+        },
+        {
+          "number": 8,
+          "title": "Choosing a business-logic pattern per subdomain",
+          "summary": "Transaction script, active record, domain model, event-sourced domain model; the subdomain type decides how much Akka to spend; 'everything is an event-sourced sharded actor' as a pitfall.",
+          "codeTag": "ch04-s08",
+          "codeChange": "Add docs/adr/0004-implementation-style-per-subdomain.md (Charging and Site Energy: event-sourced domain model in sharded persistent actors; Tariffs: domain model with Knowledge Level; Driver Accounts: small event-sourced reservation aggregate; Billing: state-stored transaction scripts on Npgsql with an outbox, no actors)."
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "part": "Part II: Strategic Design",
+      "slug": "bounded-contexts-and-context-maps",
+      "title": "Bounded Contexts, Context Maps and Distillation",
+      "wordTarget": 7500,
+      "summary": "Draws the boundaries and makes the context map executable: Bounded Context Canvas V5, modules and architecture styles, an enforced pure core, all context-mapping patterns and team relationships, deployment topology, distillation (all seven patterns) and large-scale structure.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Bounded contexts and the Bounded Context Canvas",
+          "summary": "One model per boundary ('session' in Charging versus Billing versus Roaming); every canvas field; inbound and outbound messages are the serializer-stable public contracts.",
+          "codeTag": "ch05-s01",
+          "codeChange": "Add docs/canvases/bc-charging.md, bc-site-energy.md, bc-tariffs.md, bc-driver-accounts.md, bc-billing.md, bc-device-gateway.md (Bounded Context Canvas V5 fields)."
+        },
+        {
+          "number": 2,
+          "title": "Modules made physical: architecture styles and the solution layout",
+          "summary": "Layered, hexagonal, clean and onion compared; actors are adapters, not domain; one folder per context with Domain, Contracts, Actors, ReadModels and Api projects; internal plus closed keeps case sets sealed.",
+          "codeTag": "ch05-s02",
+          "codeChange": "Create the empty project skeleton from editorial/sample-architecture.md for all contexts (Domain, Contracts, Actors, Api, ReadModels where listed; Billing; DeviceGateway.Ocpp; Ohmline.ActorShell) with correct ProjectReferences following the dependency rule; no package references yet except where a project would not otherwise build; add all to Ohmline.slnx with solution folders."
+        },
+        {
+          "number": 3,
+          "title": "Keeping the core pure, enforced",
+          "summary": "A build target and a reflection-based architecture test make sure no *.Domain project references Akka, OpenTelemetry, Npgsql or ASP.NET Core, and Contracts reference only SharedKernel.",
+          "codeTag": "ch05-s03",
+          "codeChange": "Add build/DomainPurity.targets (imported from Directory.Build.targets; for projects whose name ends in .Domain, error if any PackageReference starts with Akka/OpenTelemetry/Npgsql/Microsoft.AspNetCore). Add tests/Ohmline.ArchitectureTests (reflection over referenced assemblies of each Ohmline.*.Domain and *.Contracts assembly)."
+        },
+        {
+          "number": 4,
+          "title": "Context mapping I: teams and flows",
+          "summary": "A context-mapping workshop; mutually dependent, upstream/downstream and free team relationships; Partnership (Charging and Device Gateway), Customer/Supplier (Charging upstream of Billing), Conformist (to the roaming hub).",
+          "codeTag": "ch05-s04",
+          "codeChange": "Add docs/context-map.md (mermaid map plus a relationship table with pattern and team relationship)."
+        },
+        {
+          "number": 5,
+          "title": "Context mapping II: Shared Kernel, Open Host Service and Published Language",
+          "summary": "Shared Kernel governance (units, money and cross-context identifiers only; no actors; serializer-stable; versioned); Charging.Contracts as the Published Language with versioned names.",
+          "codeTag": "ch05-s05",
+          "codeChange": "Add src/Ohmline.SharedKernel/GOVERNANCE.md, .github/CODEOWNERS, and src/Charging/Ohmline.Charging.Contracts/README.md (naming and versioning rules for published messages)."
+        },
+        {
+          "number": 6,
+          "title": "Context mapping III: Anticorruption Layer, Separate Ways and Big Ball of Mud",
+          "summary": "The AssetTrack legacy registry (CSV full of typos and mixed units) is quarantined behind an ACL (implemented in ch06-s07); chargers' vendor-specific OCPP quirks are the other Big Ball of Mud; Separate Ways for marketing CRM and roaming v1.",
+          "codeTag": "ch05-s06",
+          "codeChange": "Add tools/legacy-assets/assettrack-export.csv (about 40 messy rows: mixed kW/W units, typos, blank priorities, duplicate sites) and docs/acl/assettrack.md (translation rules)."
+        },
+        {
+          "number": 7,
+          "title": "The executable context map and deployment topology",
+          "summary": "Every relationship maps to an artifact (contracts project, ACL project, shard-region proxy, HTTP feed); one cluster with roles for the Partnership, a separate service for Billing; the distributed Big Ball of Mud anti-pattern.",
+          "codeTag": "ch05-s07",
+          "codeChange": "Add the 'artifact per relationship' table to docs/context-map.md; add docs/adr/0005-deployment-topology.md (one Akka cluster 'ohmline' with roles charging and gateway; Billing as a separate non-Akka service)."
+        },
+        {
+          "number": 8,
+          "title": "Distillation",
+          "summary": "Domain Vision Statement (final), Core Domain, Generic Subdomains, Highlighted Core (site power allocation and the session), Cohesive Mechanisms (fair-share allocator, price calculator), Segregated Core and Abstract Core.",
+          "codeTag": "ch05-s08",
+          "codeChange": "Finalize docs/vision.md; add docs/highlighted-core.md."
+        },
+        {
+          "number": 9,
+          "title": "Large-scale structure",
+          "summary": "Evolving Order, System Metaphor ('the grid'), Responsibility Layers mapped to the actor hierarchy (supervisors operate, entities decide, projections analyze), Knowledge Level (tariffs and site policies as data), Pluggable Component Framework (per-vendor protocol quirks); honest about how rarely these are practiced.",
+          "codeTag": "ch05-s09",
+          "codeChange": "Add docs/adr/0006-responsibility-layers-and-supervision.md."
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "part": "Part III: The Functional Core",
+      "slug": "value-objects-and-entities",
+      "title": "Value Objects and Entities",
+      "wordTarget": 6500,
+      "summary": "Gives the domain types that cannot represent nonsense: units with closure of operations, smart constructors that return unions, money and rounding, strongly typed identifiers, monotonic meter readings, entities inside aggregates, an ACL that parses a Big Ball of Mud into value objects, and property-based tests.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Primitive obsession in charging: kW versus kWh versus A",
+          "summary": "Energy, Power, Current and Voltage as readonly record structs with field-validated init; Closure of Operations and dimensional analysis (Power x TimeSpan = Energy; Energy + Energy = Energy); Standalone Classes.",
+          "codeTag": "ch06-s01",
+          "codeChange": "Add SharedKernel/Units: Energy (kWh, decimal), Power (kW), Current (A), Voltage (V) readonly record structs with validating init, generic-math operators (IAdditionOperators, ISubtractionOperators, IComparisonOperators) and extension operators Power*TimeSpan->Energy, Energy/TimeSpan->Power; tests in Ohmline.SharedKernel.Tests."
+        },
+        {
+          "number": 2,
+          "title": "Smart constructors that return unions",
+          "summary": "TryCreate returns Result<T, ValidationError> where ValidationError is a union (OutOfRange, Malformed, Missing); Bind chains; no exceptions for expected failures.",
+          "codeTag": "ch06-s02",
+          "codeChange": "Replace the placeholder with `public union ValidationError(OutOfRange, Malformed, Missing);` and case records; implement IValueObject<TSelf,TValue>.TryCreate on all units; tests for each error case and Bind chains."
+        },
+        {
+          "number": 3,
+          "title": "Money, currency and rounding",
+          "summary": "Money and Currency; mixing currencies is a Result error; an implicit concept made explicit: RoundingPolicy per tariff and currency.",
+          "codeTag": "ch06-s03",
+          "codeChange": "Add SharedKernel/Money: Currency (ISO code VO), Money (amount + currency, generic-math operators within one currency, TryAdd returning Result on mismatch), RoundingPolicy (mode + decimals); tests."
+        },
+        {
+          "number": 4,
+          "title": "Identity: strongly typed identifiers",
+          "summary": "Cross-context identifiers in the Shared Kernel: SiteId, ChargePointId (human key such as OHM-SLC-0042), ConnectorId (composite: ChargePointId + connector number), SessionId (Guid v7 via TimeProvider), TokenUid, JourneyId.",
+          "codeTag": "ch06-s04",
+          "codeChange": "Add SharedKernel/Identity: SiteId, ChargePointId (regex-validated), ConnectorId (ChargePointId + int Number, ToString 'OHM-SLC-0042/1'), SessionId and JourneyId (Guid v7 with New(TimeProvider)), TokenUid (hex UID normalized to upper case) with TryCreate; tests."
+        },
+        {
+          "number": 5,
+          "title": "Meter readings: monotonic registers and time",
+          "summary": "MeterReading as a Wh register plus timestamp; energy since a previous reading returns a Result; list patterns detect a register rollback in a history.",
+          "codeTag": "ch06-s05",
+          "codeChange": "Add Charging.Domain/Metering: MeterReading (Energy register, DateTimeOffset at), MeterReading.EnergySince(previous) -> Result<Energy, MeterError>, `union MeterError(RegisterWentBackwards, ReadingOutOfOrder)`; MeterHistory helpers using list patterns; tests in new tests/Ohmline.Charging.Domain.Tests."
+        },
+        {
+          "number": 6,
+          "title": "Entities inside an aggregate: a connector is a record, not an actor",
+          "summary": "Connector is an entity identified by ConnectorId within a ChargePoint; equality by identity via a key comparer; the actor-per-row anti-pattern.",
+          "codeTag": "ch06-s06",
+          "codeChange": "Add Charging.Domain/ChargePoints/Connector.cs (sealed record with ConnectorId, MaxPower, Status placeholder) and ConnectorComparer (EqualityComparer<Connector>.Create on Id; verify the .NET 11 API, fall back to a small IEqualityComparer if absent); tests."
+        },
+        {
+          "number": 7,
+          "title": "Value objects at the boundary: parsing a Big Ball of Mud",
+          "summary": "The AssetTrack ACL: a pure translator turns messy CSV rows into SiteConfiguration value objects or explicit rejections, so the mess never reaches the model.",
+          "codeTag": "ch06-s07",
+          "codeChange": "Add src/SiteEnergy/Ohmline.SiteEnergy.Domain/Sites/SiteConfiguration.cs (SiteId, grid limit Power, safety margin, time zone id, connectors with min/max Power and a PriorityClass closed record hierarchy: Fleet, Public) and src/SiteEnergy/Ohmline.SiteEnergy.Acl.AssetRegistry (AssetTrackCsvReader + AssetTrackTranslator returning `union AssetRowTranslation(Translated, Skipped, Rejected)`); tests/Ohmline.SiteEnergy.Acl.AssetRegistry.Tests using tools/legacy-assets/assettrack-export.csv as a fixture."
+        },
+        {
+          "number": 8,
+          "title": "Property-based tests for value objects",
+          "summary": "CsCheck generators for units and money: addition is associative and commutative, rounding error is bounded, Power x TimeSpan is monotonic; the `using Gen = CsCheck.Gen` alias.",
+          "codeTag": "ch06-s08",
+          "codeChange": "Add CsCheck 5.0.1 to CPM; add Generators.cs and UnitPropertyTests/MoneyPropertyTests to Ohmline.SharedKernel.Tests."
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "part": "Part III: The Functional Core",
+      "slug": "aggregates-and-the-decider",
+      "title": "Aggregates and the Decider",
+      "wordTarget": 8500,
+      "summary": "Turns true invariants into consistency boundaries written as pure functions: Aggregate Design Canvas, commands and events as closed hierarchies, state as a union, Decide as an exhaustive decision table, total Evolve, the IDecider abstraction, and three aggregates (ChargePoint, ChargingSession, SitePowerBudget with its fair-share allocator).",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Finding the true invariants: the Aggregate Design Canvas",
+          "summary": "Canvases for ChargePoint, ChargingSession, SitePowerBudget and IdToken, including throughput (= mailbox rate) and size (= event count, which drives snapshot cadence); Vernon's four rules as the lens.",
+          "codeTag": "ch07-s01",
+          "codeChange": "Add docs/canvases/aggregate-charge-point.md, aggregate-charging-session.md, aggregate-site-power-budget.md, aggregate-id-token.md."
+        },
+        {
+          "number": 2,
+          "title": "Commands and events as closed hierarchies",
+          "summary": "Filling in the ChargePoint protocol: `closed record ChargePointCommand(ChargePointId ChargePointId)` with sealed leaves; past-tense events; why persisted shapes never contain unions.",
+          "codeTag": "ch07-s02",
+          "codeChange": "Fill Charging.Contracts/ChargePoints commands (RegisterChargePoint, ReserveConnector, CancelReservation, ExpireReservation, OccupyConnector, ReleaseConnector, ReportConnectorFault, ClearConnectorFault) and Charging.Domain/ChargePoints events (ChargePointRegistered, ConnectorReserved, ReservationCancelled, ReservationExpired, ConnectorOccupied, ConnectorReleased, ConnectorFaulted, ConnectorFaultCleared) with data fields."
+        },
+        {
+          "number": 3,
+          "title": "State as a union: making illegal states unrepresentable",
+          "summary": "union ConnectorState(Available, Reserved, Occupied, Faulted, Unavailable) where each case carries only the data valid in it; union ChargePointState(Unregistered, Registered); the null-arm discipline.",
+          "codeTag": "ch07-s03",
+          "codeChange": "Add ConnectorState union and case records (Reserved has TokenUid and ExpiresAt; Occupied has SessionId), ChargePointState union (Unregistered, Registered with ImmutableDictionary<int, Connector>), static Initial."
+        },
+        {
+          "number": 4,
+          "title": "Decide: business rules as an exhaustive decision table",
+          "summary": "Decide(state, command, context) as a switch over (state, command) tuples; Declarative Design; a union error set; DecisionContext carries Now (no clock reads inside); the factory is the (Unregistered, RegisterChargePoint) arm.",
+          "codeTag": "ch07-s04",
+          "codeChange": "Add DecisionContext (DateTimeOffset Now) to SharedKernel; add ChargePoint.Decide returning Result<ImmutableArray<ChargePointEvent>, ChargePointError> with `union ChargePointError(NotRegistered, AlreadyRegistered, UnknownConnector, ConnectorUnavailable, ReservedForAnotherToken, ConnectorFaulted)`; tests per arm."
+        },
+        {
+          "number": 5,
+          "title": "Evolve: total, deterministic, never failing",
+          "summary": "Evolve never validates (replay must not fail); recovery is a fold; non-determinism is captured in Decide and recorded in events.",
+          "codeTag": "ch07-s05",
+          "codeChange": "Add ChargePoint.Evolve(state, event) and ChargePoint.Fold(IEnumerable<ChargePointEvent>); tests including folding every event type."
+        },
+        {
+          "number": 6,
+          "title": "The Decider abstraction",
+          "summary": "IDecider<TState,TCommand,TEvent,TError> with static abstract Initial, Decide and Evolve; one shape for every aggregate, ready for one actor shell.",
+          "codeTag": "ch07-s06",
+          "codeChange": "Add SharedKernel/Deciders/IDecider.cs (static abstract TState Initial; Result<ImmutableArray<TEvent>,TError> Decide(TState, TCommand, DecisionContext); TState Evolve(TState, TEvent)) and Decider.Fold<TDecider,...> helper; ChargePoint implements it (static class becomes `sealed class ChargePoint : IDecider<...>`)."
+        },
+        {
+          "number": 7,
+          "title": "The ChargingSession aggregate",
+          "summary": "Monotonic meters, tariff locked at start, spend cap; facts you cannot reject (a meter going backwards becomes MeterAnomalyDetected, not a rejection); idempotency via state (a duplicate stop is a no-op).",
+          "codeTag": "ch07-s07",
+          "codeChange": "Add Charging.Contracts/Sessions: SessionCommand closed hierarchy (StartSession, RecordMeterValue, SuspendCharging, ResumeCharging, StopSession); Charging.Domain/Sessions: SessionEvent closed hierarchy (SessionStarted with TariffId+TariffVersion placeholder and SpendCap Money, MeterValueRecorded, MeterAnomalyDetected, ChargingSuspended, ChargingResumed, SpendCapReached, SessionEnded), `union SessionState(NoSession, Charging, Suspended, Ended)`, `union SessionError(...)`, ChargingSession : IDecider; tests."
+        },
+        {
+          "number": 8,
+          "title": "The SitePowerBudget aggregate and the fair-share allocator",
+          "summary": "The invariant: sum of allocations <= effective capacity (grid limit - active curtailment - safety margin), each allocation within the connector's min/max, priority classes; the water-filling allocator as a pure Cohesive Mechanism (labeled break in the allocation loop); hot-aggregate analysis.",
+          "codeTag": "ch07-s08",
+          "codeChange": "Add Ohmline.SiteEnergy.Domain/Budgets: PowerAllocation VO, PriorityClass, FairShareAllocator.Allocate(capacity, IReadOnlyList<AllocationRequest>) -> ImmutableArray<PowerAllocation>; SitePowerBudget : IDecider with commands in Ohmline.SiteEnergy.Contracts (ConfigureSite, RequestAllocation, ReleaseAllocation, ApplyCurtailment, EndCurtailment) and events in the Domain (SiteConfigured, AllocationGranted, AllocationQueued, AllocationsRebalanced, AllocationReleased, CurtailmentApplied, CurtailmentEnded), `union AllocationDecision(Granted, Reduced, Queued)`; tests/Ohmline.SiteEnergy.Domain.Tests."
+        },
+        {
+          "number": 9,
+          "title": "Vernon's four rules in Ohmline",
+          "summary": "Protect true invariants, small aggregates, reference by identity (SiteId, never IActorRef), eventual consistency outside the boundary (session and site budget are separate); sidebars: anemic actor, logic in Receive, actor-per-row.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "part": "Part III: The Functional Core",
+      "slug": "events-services-policies-supple-design",
+      "title": "Domain Events, Services, Policies and Supple Design",
+      "wordTarget": 6500,
+      "summary": "Covers the rest of Evans's tactical patterns: domain events as facts carrying decision inputs, Tariffs as a Knowledge Level, a pure price calculator as a domain service, specifications (as classes and as C# patterns), policies as pure reactions, a refactoring toward deeper insight, time zones and DST, and the eight supple-design patterns.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Domain events as facts experts care about",
+          "summary": "Events are named in the past tense and carry the decision inputs (tariff snapshot, allocation) rather than state dumps; granularity; OccurredAt from the DecisionContext; CommandId for causation.",
+          "codeTag": "ch08-s01",
+          "codeChange": "Add CommandId (Guid v7) to every command base record and OccurredAt to every event base record across Charging and SiteEnergy domains; update deciders and tests."
+        },
+        {
+          "number": 2,
+          "title": "Tariffs as a Knowledge Level",
+          "summary": "union TariffComponent(EnergyRate, TimeRate, IdleFee, SessionFee); time-of-use bands in site-local time; price caps; versioned tariffs; the TariffSnapshot locked into SessionStarted.",
+          "codeTag": "ch08-s02",
+          "codeChange": "Fill src/Tariffs/Ohmline.Tariffs.Domain: TariffComponent union and cases, TimeOfUseBand, Tariff (TariffId, Version, Currency, components), TariffSnapshot; change SessionStarted to carry a TariffSnapshot; tests/Ohmline.Tariffs.Domain.Tests."
+        },
+        {
+          "number": 3,
+          "title": "Domain services: the price calculator",
+          "summary": "A pure PriceCalculator.Price(TariffSnapshot, SessionUsage) -> PriceBreakdown; 'decide with the data you were given'; a service that does I/O is not a domain service.",
+          "codeTag": "ch08-s03",
+          "codeChange": "Add Tariffs.Domain/Pricing: SessionUsage, PriceBreakdown (line items + total Money), PriceCalculator (splits usage across TOU bands, applies session/idle fees, caps, RoundingPolicy); tests."
+        },
+        {
+          "number": 4,
+          "title": "Specifications: as classes and as patterns",
+          "summary": "ISpecification<T> with And/Or/Not versus C# property and list patterns, side by side (IdleFeeApplies, RequiresPreAuthorization); where each fits (decide, projections, routing).",
+          "codeTag": "ch08-s04",
+          "codeChange": "Add SharedKernel/Specifications (ISpecification<T>, AndSpecification, OrSpecification, NotSpecification, extension members And/Or/Not); Charging.Domain/Sessions/Specifications.cs with IdleFeeApplies and RequiresPreAuthorization both as classes and as static pattern-based predicates; tests."
+        },
+        {
+          "number": 5,
+          "title": "Policies: 'whenever X then Y' as pure reactions",
+          "summary": "Lilac stickies become pure React(event) -> commands functions (IdleFeePolicy, SpendCapPolicy, SessionEndedReleasesAllocation); policy as Strategy; preparing for choreography and the process manager.",
+          "codeTag": "ch08-s05",
+          "codeChange": "Add Charging.Domain/Policies: IdleFeePolicy, SpendCapPolicy, ReleaseOnSessionEnded (React returns ImmutableArray of Charging-owned intent records such as ReleaseSiteAllocation(SiteId, ConnectorId) and UnlockToken(TokenUid); the shell translates intents into other contexts' commands in ch15); tests."
+        },
+        {
+          "number": 6,
+          "title": "Refactoring toward deeper insight: who suspended the charge?",
+          "summary": "A hotspot from operations: idle fees must depend on who suspended the charge. Suspended splits into SuspendedByEv and SuspendedByCharger across state, events and Decide; the diff is the lesson.",
+          "codeTag": "ch08-s06",
+          "codeChange": "Refactor ChargingSession: replace Suspended with SuspendedByEv and SuspendedByCharger cases, split ChargingSuspended into ChargingSuspendedByEv/ChargingSuspendedByCharger events, update Decide/Evolve, IdleFeeApplies and tests; compiler errors from CS8509 guide the change."
+        },
+        {
+          "number": 7,
+          "title": "Time in the domain: site-local time, time-of-use and DST",
+          "summary": "SiteLocalTime with a time zone id; resolving TOU bands across DST transitions; no clock reads in Evolve.",
+          "codeTag": "ch08-s07",
+          "codeChange": "Add SharedKernel/Time/SiteLocalTime.cs (TimeZoneInfo by IANA id) and use it in PriceCalculator band resolution; FakeTimeProvider-based DST tests (America/Denver spring-forward and fall-back)."
+        },
+        {
+          "number": 8,
+          "title": "The supple design checklist",
+          "summary": "Intention-revealing interfaces, side-effect-free functions, assertions, standalone classes, closure of operations, declarative design, conceptual contours, drawing on established formalisms: where each appears in Ohmline so far.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "part": "Part III: The Functional Core",
+      "slug": "unit-testing-the-domain",
+      "title": "Unit Testing the Domain",
+      "wordTarget": 6000,
+      "summary": "The bulk of the test pyramid: fast, deterministic tests written in the domain's language. A generic Given-When-Then harness over deciders, scenario tables, model-based property tests for invariants, testing time, and testing translators and policies; plus DDD test smells.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "The test pyramid for a functional core and an actor shell",
+          "summary": "Layers and tools: domain (GWT, properties), actor (TestKit), persistence (Persistence.TestKit), hosted (Hosting.TestKit), integration (Testcontainers), system (Aspire); MultiNode is advanced and out of scope; xUnit v3 on MTP in depth (OutputType Exe, no top-level statements, `dotnet test --solution`, TestContext.Current.CancellationToken, xunit.v3.templates).",
+          "codeTag": "ch09-s01",
+          "codeChange": "Add docs/testing-strategy.md (layer table, naming conventions, what not to test)."
+        },
+        {
+          "number": 2,
+          "title": "A Given-When-Then harness for deciders",
+          "summary": "Given(events).When(command).Then(events) / ThenRejects<TError>() over any IDecider; comparing union cases via .Value; readable failure messages.",
+          "codeTag": "ch09-s02",
+          "codeChange": "Create tests/Ohmline.Testing (classlib, IsTestProject false, OutputType Library; references SharedKernel and Shouldly only) with DeciderSpec<TDecider,TState,TCommand,TEvent,TError>; rewrite ChargePoint, ChargingSession and SitePowerBudget tests to use it."
+        },
+        {
+          "number": 3,
+          "title": "Specification by example: scenario tables in the ubiquitous language",
+          "summary": "TheoryData decision tables; test names from the glossary; the pricing expert's examples as a data file.",
+          "codeTag": "ch09-s03",
+          "codeChange": "Add scenario-table tests (TheoryData) for ChargePoint reservations and session stops; add tests/Ohmline.Tariffs.Domain.Tests/pricing-examples.csv and a data-driven PriceCalculatorExampleTests."
+        },
+        {
+          "number": 4,
+          "title": "Model-based property tests for invariants",
+          "summary": "CsCheck random command sequences: allocations never exceed effective capacity; Evolve is total for every event Decide produces; Decide never emits an event Evolve ignores; meter totals are monotonic. The Assertions supple-design pattern.",
+          "codeTag": "ch09-s04",
+          "codeChange": "Add DeciderProperties helper in Ohmline.Testing (generate command sequences, fold through Decide/Evolve, check an invariant) and property tests for SitePowerBudget, ChargingSession and ChargePoint."
+        },
+        {
+          "number": 5,
+          "title": "Testing time",
+          "summary": "FakeTimeProvider for reservation expiry, idle-fee grace periods and TOU boundaries that cross midnight and DST.",
+          "codeTag": "ch09-s05",
+          "codeChange": "Add time-focused tests (ReservationExpiryTests, IdleFeeGraceTests, TouBoundaryTests) using FakeTimeProvider to build DecisionContext."
+        },
+        {
+          "number": 6,
+          "title": "Testing translators and policies; DDD test smells",
+          "summary": "Table tests for the AssetTrack ACL and for React policies; smells: asserting state instead of events, mocking a repository that does not exist, testing through actors what belongs in the core.",
+          "codeTag": "ch09-s06",
+          "codeChange": "Add table tests for AssetTrackTranslator edge cases and for each policy's React; a short tests/README.md listing the smells."
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "part": "Part IV: The Actor Shell",
+      "slug": "aggregate-as-persistent-actor",
+      "title": "The Aggregate as a Persistent Actor: Commands, Events and the Journal",
+      "wordTarget": 8000,
+      "summary": "Puts the deciders inside Akka.Persistence and follows one command all the way to disk. The shell owns identity, concurrency, durability, time and messaging; replies are wire-safe closed records (and the union-on-the-wire trap is shown); a System.Text.Json manifest serializer is in place before the first persisted event. The command -> Decide -> PersistAll -> journal write -> Evolve -> reply cycle is drawn as a sequence diagram, and the chapter shows exactly what the actor does while a write is in flight (the internal stash), how Persist, PersistAsync, PersistAll and DeferAsync differ and which ordering guarantees each gives, what really lands in the SQLite journal (a guided tour of real rows), why the single-writer guarantee lets sequence numbers replace optimistic locks and what the sequence-number conflict looks like if two incarnations ever write, and finally a reusable DeciderActor for the other aggregates. Chapter 11 continues with recovery, snapshots, Durable State, failure and testing.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "What the shell owns; a composition root with Akka.Hosting",
+          "summary": "Identity, concurrency, durability, time, messaging; the Node host; one AddXxxContext extension per bounded context.",
+          "codeTag": "ch10-s01",
+          "codeChange": "Add src/Ohmline.Node (Microsoft.NET.Sdk.Web; Program with AddAkka(\"ohmline\", ...), TimeProvider.System singleton, /alive endpoint) referencing Ohmline.Charging.Actors; add Akka.Hosting, Akka.Persistence.Hosting to CPM; Ohmline.Charging.Actors gets ChargingAkkaExtensions.AddChargingContext(this AkkaConfigurationBuilder) (empty for now); Ohmline.ActorShell gets Akka package reference."
+        },
+        {
+          "number": 2,
+          "title": "Protocol: commands in, replies out, and the union trap",
+          "summary": "Wire replies are closed records (CommandAccepted, CommandRejected with a code and message); the error union is mapped to a wire-safe reply in the shell; a protocol union inside the actor gives exhaustive dispatch; the typed Send extension member unwraps .Value so a union never goes on the wire.",
+          "codeTag": "ch10-s02",
+          "codeChange": "Add Ohmline.Charging.Contracts/Replies.cs (`closed record CommandReply` with CommandAccepted(long Version), CommandRejected(string Code, string Message)) and ChargePointQueries (GetChargePointStatus, ChargePointStatus); Ohmline.ActorShell/Messaging/SendExtensions.cs (`extension(IActorRef self) { public void Send<TProtocol>(TProtocol msg) where TProtocol : IUnion => self.Tell(msg.Value) ... }`); ErrorMapping in Charging.Actors (ChargePointError -> CommandRejected). Create branch wrong/ch10-s02-union-on-the-wire (one commit: reply with the error union directly; a serialize-messages test shows Value == null)."
+        },
+        {
+          "number": 3,
+          "title": "Serialization before the first persisted event",
+          "summary": "Akka 1.5's default Newtonsoft serializer writes assembly-qualified $type names (renames break replay; private-constructor value objects fail); a System.Text.Json SerializerWithStringManifest with explicit, permanent manifests and serializer IDs, registered with WithCustomSerializer; golden files freeze the shapes.",
+          "codeTag": "ch10-s03",
+          "codeChange": "Add Ohmline.ActorShell/Serialization/ManifestJsonSerializer (abstract SerializerWithStringManifest; FrozenDictionary<string, Type> + FrozenDictionary<Type, string> registry; JsonSerializerOptions with converters for SharedKernel VOs; throws on unknown manifest) and Ohmline.Charging.Actors/Serialization/ChargingSerializer (Identifier 9101; manifests 'charging.<kebab-name>.v1' for every ChargePoint command, event, reply and query); registration via WithCustomSerializer(\"charging\", [typeof(ChargePointEvent), typeof(ChargePointCommand), typeof(CommandReply)], ...). Add golden-file helper Golden.cs to tests/Ohmline.Testing (writes/compares tests/golden/<name>.json; accept with OHMLINE_ACCEPT_GOLDEN=1) and tests/Ohmline.Charging.Actors.Tests/SerializationTests (round trip + golden for every manifest). Add docs/adr/0007-serializer-ids-and-manifests-are-permanent.md. Create branch wrong/ch10-s03-default-serializer (journal row shows $type with assembly name; renaming an event breaks recovery)."
+        },
+        {
+          "number": 4,
+          "title": "ReceivePersistentActor: Decide, PersistAll, Evolve, reply",
+          "summary": "The command path, drawn as a mermaid sequence diagram from the sender to the journal and back: capture Sender, Decide with a DecisionContext from TimeProvider, PersistAll the case records (one AtomicWrite), Evolve in each callback, reply in the onComplete callback after the last event, with LastSequenceNr becoming the Version in CommandAccepted; a rejection persists nothing and replies at once; query handlers registered before the command base type; AK1006. The first shell tests, with serialize-messages on from the start.",
+          "codeTag": "ch10-s04",
+          "codeChange": "Add Charging.Actors/ChargePoints/ChargePointActor (ReceivePersistentActor; PersistenceId 'charge-point-{id}'; Command<GetChargePointStatus> then Command<ChargePointCommand>; Recover<ChargePointEvent>; reply in the PersistAll onComplete overload); register in Node with in-memory journal (WithInMemoryJournal) for now. Add Akka.Persistence.TestKit.Xunit to CPM; add ActorTestConfig to tests/Ohmline.Testing (HOCON: akka.actor.serialize-messages = on, serialize-creators = off, akka.test.timefactor from env OHMLINE_TIMEFACTOR); create tests/Ohmline.Charging.Actors.Tests (moving SerializationTests' project setup) with ChargePointActorTests on Akka.Persistence.TestKit.Xunit's PersistenceTestKit: accepted command replies CommandAccepted with Version == number of events persisted so far, rejected command replies CommandRejected and persists nothing, a query after a command sees the evolved state."
+        },
+        {
+          "number": 5,
+          "title": "While the write is in flight: the internal stash",
+          "summary": "Between PersistAll and its last callback the actor handles no new command: Akka.Persistence parks every incoming message in an internal stash (separate from IWithStash) and unstashes them in arrival order after the callbacks, so a slow journal becomes mailbox latency, never a race; a second sequence diagram shows two commands overlapping one slow write. The guarantees per persistence id: events are written in the order Decide returned them, callbacks run in that order, and no command observes a half-applied decision. Costs: the internal stash is unbounded by default and the configured internal-stash-overflow-strategy throws when a bound is set; a slow database backs up every mailbox it serves; Sender is stable inside callbacks, but capturing it is still the house style.",
+          "codeTag": "ch10-s05",
+          "codeChange": "Add tests/Ohmline.Charging.Actors.Tests/InFlightWriteTests using the Akka.Persistence.TestKit journal interceptor to delay the write of ReserveConnector (verify the 1.5.73 API for a delayed pass, e.g. a custom IJournalInterceptor awaiting a TaskCompletionSource the test releases): while the write is held, send GetChargePointStatus and OccupyConnector for a different token; assert no reply arrives until the write is released, that the query then reports the reservation, and that replies arrive in send order (ReserveConnector accepted, status, OccupyConnector rejected 'reserved-for-another-token')."
+        },
+        {
+          "number": 6,
+          "title": "Persist, PersistAsync, PersistAll and DeferAsync",
+          "summary": "The four write calls compared in one table: stashing or not, callback order, throughput and when each is right. PersistAsync does not stash, so a later command can be decided against state whose earlier event has not been applied yet: wrong for a decider, right for a high-rate recorder of facts that never rejects anything. DeferAsync runs a handler after every preceding PersistAsync has completed, without writing anything. PersistAll keeps one decision atomic (one AtomicWrite: all of its events or none), which is why AK1006 asks for it instead of a loop of Persist calls; the async-handler and onComplete overloads arrived in 1.5.57. The house rule: deciders always use PersistAll.",
+          "codeTag": "ch10-s06",
+          "codeChange": "Add learn/Ch10.PersistenceLab.Tests (xunit.v3, Shouldly, Akka.Persistence.TestKit.Xunit; references nothing from src) with tiny counter actors and learning tests: PersistStashesTests (a command sent during a write waits for the callback), PersistAsyncInterleavesTests (a command is handled before the earlier event's callback ran and observes the old count), DeferAsyncOrderingTests (the deferred handler runs after all preceding PersistAsync callbacks, in order), PersistAllAtomicTests (a journal write failure injected for the batch leaves none of its events in the journal); add to Ohmline.slnx under /learn/. Create branch wrong/ch10-s06-persist-async-decider (ChargePointActor switched to PersistAsync; a test sending two OccupyConnector commands for one connector back to back sees both accepted)."
+        },
+        {
+          "number": 7,
+          "title": "Real storage: Akka.Persistence.Sql on SQLite",
+          "summary": "Akka.Persistence.Sql.Hosting with ProviderName.SQLiteMS; autoInitialize true for now (ch20 replaces it with owned migrations); the deprecated Akka.Persistence.Sqlite/PostgreSql plugins to avoid; restarting the Node and seeing state survive.",
+          "codeTag": "ch10-s07",
+          "codeChange": "Add Akka.Persistence.Sql.Hosting and Microsoft.Data.Sqlite 10.0.14 to CPM; Node configures WithSqlPersistence(connectionString from 'ConnectionStrings:journal', ProviderName.SQLiteMS, autoInitialize: true) in Development via appsettings.Development.json (Data Source=ohmline.db); ohmline.db* added to .gitignore."
+        },
+        {
+          "number": 8,
+          "title": "A guided tour of the journal",
+          "summary": "What actually lands in SQLite when a ChargePointActor accepts two commands and rejects a third, shown as real rows: the journal table's columns (ordering, the global position Persistence Query will use in Chapter 13; persistence_id; sequence_number; created, a UTC timestamp; manifest and identifier from our serializer; message, the UTF-8 JSON bytes; deleted; writer_uuid; the tags column that stays empty in TagTable mode), the tags and snapshot tables that Chapters 13 and 11 fill, and the absence of any row for the rejected command. Reading rows is for learning and incident work, never for application logic.",
+          "codeTag": "ch10-s08",
+          "codeChange": "Add tests/Ohmline.Charging.Actors.Tests/JournalTour/JournalTourTests: starts a host with AddAkka + WithSqlPersistence on a temporary SQLite file and the real ChargingSerializer, sends RegisterChargePoint, ReserveConnector and a rejected OccupyConnector to charge point OHM-SLC-0042, then reads the journal, tags and snapshot tables with Microsoft.Data.Sqlite and asserts persistence_id 'charge-point-OHM-SLC-0042', sequence_number 1 and 2, manifests 'charging.charge-point-registered.v1' and 'charging.connector-reserved.v1', identifier 9101, a JSON payload that deserializes, and no third row; writes the rows to the test output. Add JournalTour/JournalTourQueries.cs (the SELECT statements, reused by tools/Ohmline.JournalInspect in ch20-s01) and docs/journal-tour.md with the real rows captured from the test output (verify the exact column types, in particular how 'created' is stored)."
+        },
+        {
+          "number": 9,
+          "title": "One writer per persistence id: sequence numbers instead of locks",
+          "summary": "The single-writer guarantee (one live incarnation per persistence id, which sharding and the split-brain resolver provide in Chapter 12) means Decide always sees every earlier event, so the expected-version checks of a database-backed repository are unnecessary inside the aggregate: the actor is the lock and the sequence number is the aggregate's version (the Version in every CommandAccepted). An expected version still belongs where a person decided from a stale screen (section 19.3). If two incarnations ever did write, both recover to sequence n and both try to write n + 1; the journal's uniqueness on (persistence_id, sequence_number) rejects the second write, OnPersistFailure stops that actor and its stashed commands become dead letters; writer_uuid and the replay filter (repair-by-discard-old) protect later reads. This is a safety net, not a concurrency strategy (section 21.8: never two writers).",
+          "codeTag": "ch10-s09",
+          "codeChange": "Add tests/Ohmline.Charging.Actors.Tests/JournalTour/TwoIncarnationsTests: on a temporary SQLite journal, start two ChargePointActor instances with the same PersistenceId under different names (deliberately bypassing the one-writer rule), let both recover, make the first accept ReserveConnector and then the second accept CancelReservation for another connector; assert the second write fails (OnPersistFailure logged at ERROR; a watching TestProbe sees Terminated), that the journal holds exactly one row per sequence number, and that a fresh incarnation recovers the first writer's events. Extend docs/journal-tour.md with a 'Two writers' section quoting the observed error (verify that Akka.Persistence.Sql's SQLite schema enforces the uniqueness; if it does not, the test documents what happens instead and the editor adjusts the section)."
+        },
+        {
+          "number": 10,
+          "title": "A reusable DeciderActor and the other aggregates",
+          "summary": "Extracting DeciderActor<TDecider,...> from ChargePointActor; ChargingSessionActor and SitePowerBudgetActor built on it; serializers for Site Energy; the anemic-actor and logic-in-Receive anti-patterns.",
+          "codeTag": "ch10-s10",
+          "codeChange": "Add Ohmline.ActorShell/Deciders/DeciderActor<TDecider,TState,TCommand,TEvent,TError> (abstract ReceivePersistentActor: PersistenceId from entity id, the command path from section 10.4, error-to-reply mapping hook, and protected OnEventApplied/OnRecovered hooks that Chapter 11 uses for snapshots and timers); refactor ChargePointActor onto it; add ChargingSessionActor (Charging.Actors) and SitePowerBudgetActor (Ohmline.SiteEnergy.Actors) with SiteEnergySerializer (Identifier 9102, manifests 'site-energy.<kebab>.v1') and golden files; actor tests for both. Create branch wrong/ch10-s10-logic-in-receive (business rules in Receive handlers; the decider tests no longer cover them)."
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "part": "Part IV: The Actor Shell",
+      "slug": "recovery-snapshots-and-failure",
+      "title": "Recovery, Snapshots, Durable State and Failure",
+      "wordTarget": 8000,
+      "summary": "Follows a persistent aggregate through the rest of its life. Recovery in depth (snapshot offer, replay through Evolve only, RecoveryCompleted, the stash during recovery) drawn as a sequence diagram; snapshots as a cache with a cost model; recovery at scale (max-concurrent-recoveries, recovery storms, the journal circuit breaker) and recovery failure (the poison event); timers re-armed from recovered state; a preview of the passivation-and-rehydration lifecycle that Chapter 12 automates; failure semantics (domain errors versus infrastructure failures, persist failure versus rejection, what happens to stashed commands); Durable State as the non-event-sourced alternative, which Akka.NET 1.5.73 does not ship, compared honestly and built the Akka.NET way for a supporting ChargePointListing; and testing the shell with Akka.Persistence.TestKit's scriptable journal and snapshot store.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Recovery in depth",
+          "summary": "What happens between an actor's construction and its first command, as a mermaid sequence diagram: the snapshot store offers the latest snapshot (none yet), the journal replays the remaining events in sequence order through Recover handlers (Evolve only: never Decide, never a reply, never a side effect), then RecoveryCompleted arrives; commands that arrive meanwhile wait in the internal stash; IsRecovering, LastSequenceNr and SnapshotSequenceNr; recovery-event-timeout (30 s by default) and Akka.Persistence.Sql's replay-batch-size (1,000); why a total, deterministic Evolve (section 7.5) is what makes replay safe.",
+          "codeTag": "ch11-s01",
+          "codeChange": "DeciderActor measures recovery (events replayed, elapsed time from a Stopwatch, whether a snapshot was used) and logs one INFO line in RecoveryCompleted; add tests/Ohmline.Charging.Actors.Tests/RecoveryTests: persist N events, stop the actor, start a new incarnation with the same id, assert its state equals Decider.Fold over the same events, and assert that a command sent before RecoveryCompleted is answered after it with Version N + 1."
+        },
+        {
+          "number": 2,
+          "title": "Snapshots: a cache with a cost model",
+          "summary": "Recovery time grows with event count; a snapshot DTO (never the union state) with its own manifest; cadence from the Aggregate Design Canvas 'size' and the measured replay cost; SaveSnapshot is asynchronous and never blocks commands; deleting old snapshots; the snapshot row added to the journal tour; why a snapshot never replaces the events.",
+          "codeTag": "ch11-s02",
+          "codeChange": "Add ChargePointSnapshot DTO + mapping to/from ChargePointState, manifest 'charging.charge-point-snapshot.v1' (golden file); DeciderActor snapshot support through the OnEventApplied hook: SaveSnapshot every 100 events (overridable per aggregate), DeleteSnapshots up to the previous one on SaveSnapshotSuccess, WARNING log on SaveSnapshotFailure, Recover<SnapshotOffer>; snapshot DTOs and manifests for ChargingSession and SitePowerBudget; extend JournalTourTests with the snapshot table row (persistence_id, sequence_number, created, manifest, serializer_id); RecoveryTests: recovery from a snapshot plus tail events equals a full replay."
+        },
+        {
+          "number": 3,
+          "title": "Recovery at scale: throttling, storms and the poison event",
+          "summary": "After a node restart hundreds of charge points recover at once; akka.persistence.max-concurrent-recoveries (default 50) makes the rest wait so the database is not stampeded; estimating a recovery storm (entities x events / replay rate) and how snapshots and passivation shrink it; the journal circuit breaker (max-failures 10, call-timeout 10 s, reset-timeout 30 s). OnRecoveryFailure: an unreadable event, an unknown manifest or a journal outage stops the actor, and a sharded entity is started again by its next message and fails again (the poison event); the runbook: fix the serializer or add an upcaster, never edit the row.",
+          "codeTag": "ch11-s03",
+          "codeChange": "Node sets akka.persistence.max-concurrent-recoveries = 50 explicitly through HOCON in Program (with a comment naming the default); DeciderActor overrides OnRecoveryFailure (ERROR log with persistence id, sequence number and, when available, the manifest); add RecoveryFailureTests (Akka.Persistence.TestKit WithJournalRecovery(r => r.Fail()): the actor stops and a watching probe sees Terminated) and a SQLite-backed PoisonEventTests that inserts a journal row with an unknown manifest and asserts the recovery-failure log line; add docs/runbooks/poison-event.md."
+        },
+        {
+          "number": 4,
+          "title": "Timers derived from state: reservation expiry",
+          "summary": "Time-driven commands: the shell schedules a timer from state (ReservationExpiresAt) and sends ExpireReservation to itself; timers re-armed after recovery, because a recovered or rehydrated actor has none; the decider still decides.",
+          "codeTag": "ch11-s04",
+          "codeChange": "ChargePointActor implements IWithTimers and uses DeciderActor's OnEventApplied and OnRecovered hooks to (re)start single timers keyed 'reservation-{connector}' for every Reserved connector; the timer message maps to the ExpireReservation command; tests with a FakeTimeProvider-built DecisionContext and short TestKit intervals, including expiry after a restart."
+        },
+        {
+          "number": 5,
+          "title": "Passivation and rehydration: an entity's life",
+          "summary": "A preview of the lifecycle Chapter 12 automates, drawn as a stateDiagram-v2: created by its first message, recovering, serving commands, idle, passivated (the shard asks it to stop with a hand-off message so nothing in flight is lost), absent from memory but whole in the journal, rehydrated by the next message from its snapshot plus the tail. What this means for memory (only active entities are resident), for timers (a passivated reservation still expires because section 11.4 re-arms timers on recovery) and for recovery storms (section 11.3); why PoisonPill and Context.Stop are wrong for persistent entities (section 12.4).",
+          "codeTag": null,
+          "codeChange": ""
+        },
+        {
+          "number": 6,
+          "title": "Failure semantics: errors versus failures",
+          "summary": "Domain rejections are values and replies; a persist failure stops the actor (backoff supervisor or sharding restart) and the commands stashed behind the failed write become dead letters, so their senders time out and retry with the same idempotency key (section 12.6); a persist rejection (for example a serialization error) keeps the actor alive; a sequence diagram of each; never PoisonPill a persistent actor.",
+          "codeTag": "ch11-s06",
+          "codeChange": "Override OnPersistFailure/OnPersistRejected in DeciderActor (log; reply CommandRejected 'persistence-rejected' on rejection); wrap the entity actors in BackoffSupervisor in Node for now; add docs/adr/0008-errors-versus-failures.md."
+        },
+        {
+          "number": 7,
+          "title": "Durable State: the non-event-sourced alternative",
+          "summary": "Not every aggregate needs its history. JVM Akka's Durable State keeps only the latest state with a revision number in a DurableStateStore; Akka.NET 1.5.73 (and 1.6.0-beta5) ship no Durable State store, which the editor checked against the assemblies and NuGet on 2026-11-04. The section compares the options honestly in one table (history, queries through projections, storage growth, schema evolution, concurrency): event sourcing; state sourcing on the journal (persist the whole new state as one event, snapshot after every write, delete what came before); a state-stored repository behind an actor with optimistic concurrency on a revision column; and no actor at all (Billing, section 16.3). The supporting ChargePointListing (display name, access instructions such as 'Level -2, bays 14-19', opening hours) is built the state-sourced way and is later shown in the driver app. The rule: choose by whether anyone will ever ask what happened, not by convenience.",
+          "codeTag": "ch11-s07",
+          "codeChange": "Add Charging.Contracts/Listings (ReviseChargePointListing command; GetChargePointListing query; ChargePointListingView reply) and Charging.Domain/Listings (`union ListingState(Unlisted, Listed)`; ChargePointListing : IDecider whose Decide emits one ChargePointListingRevised event carrying the whole listing and a Revision, and whose Evolve replaces the state); Ohmline.ActorShell/Deciders/StateSourcedDeciderActor (a DeciderActor variant that saves a snapshot after every write and, on SaveSnapshotSuccess, deletes older events and snapshots with DeleteMessages/DeleteSnapshots); Charging.Actors/Listings/ChargePointListingActor; manifests 'charging.charge-point-listing-revised.v1' and 'charging.charge-point-listing-snapshot.v1' with golden files; tests (the revision increments, a restarted incarnation recovers from the snapshot alone, the journal tour shows older rows deleted; verify whether Akka.Persistence.Sql deletes physically or marks rows deleted and document what is observed); add docs/persistence-choices.md with the comparison table."
+        },
+        {
+          "number": 8,
+          "title": "Testing the shell with Akka.Persistence.TestKit",
+          "summary": "The persistence test kit as a scriptable journal and snapshot store: WithJournalWrite (pass, fail, reject), WithJournalRecovery, WithSnapshotSave and WithSnapshotLoad; Akka.TestKit.Xunit and Akka.Persistence.TestKit.Xunit (not the outdated Xunit2 packages); serialize-messages = on in every actor test, because the in-memory journal otherwise hides serialization bugs; rejections are logged at ERROR; a reusable PersistenceShellSpec that drives any DeciderActor with Given(events) When(command) Then(reply, persisted events), the shell-level twin of the Chapter 9 harness; what not to test here (business rules belong to the decider tests).",
+          "codeTag": "ch11-s08",
+          "codeChange": "Add tests/Ohmline.Testing/PersistenceShellSpec (seeds the TestKit journal with events for a persistence id by persisting them through a seeding actor, sends a command to the real actor, asserts the reply, and reads the newly persisted events back by recovering a fresh probe incarnation; verify whether the 1.5.73 TestKit offers a more direct journal query); rewrite ChargePointActorTests, ChargingSessionActorTests and SitePowerBudgetActorTests onto it; add PersistenceFailureTests (WithJournalWrite(w => w.Fail()) stops the actor; w.Reject() replies CommandRejected 'persistence-rejected' and keeps it alive) and SnapshotFailureTests (WithSnapshotSave(s => s.Fail()) logs a WARNING and changes no reply); rewrite the in-flight write test from section 10.5 on the spec."
+        }
+      ]
+    },
+    {
+      "number": 12,
+      "part": "Part IV: The Actor Shell",
+      "slug": "cluster-sharding-and-application-services",
+      "title": "Cluster Sharding: The Shard Region as Repository",
+      "wordTarget": 8500,
+      "summary": "Location transparency for real: clustering with roles and the split-brain resolver, shard regions as repositories, message extractors and permanent names, props factories with DI, passivation, application services at the HTTP edge, idempotency keys, uniqueness across aggregates, the Knowledge Level as a cluster singleton, sharding tests, Postgres and a multi-node cluster under Aspire, and integration tests with Testcontainers.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "From one node to a cluster",
+          "summary": "Remoting and clustering with Akka.Hosting, roles, a self-joining development node; split-brain resolver defaults (keep-majority, stable-after 20s) set explicitly; the single-active-entity guarantee and when it fails.",
+          "codeTag": "ch12-s01",
+          "codeChange": "Add Akka.Cluster.Hosting to CPM; Node: WithRemoting(hostname/port from config), WithClustering(new ClusterOptions { Roles = [\"charging\"], SeedNodes from config, SplitBrainResolver = keep-majority }), self-join in Development."
+        },
+        {
+          "number": 2,
+          "title": "The shard region is the repository",
+          "summary": "WithShardRegion per aggregate; a HashCodeMessageExtractor that reads the entity id from the command (never handle StartEntity, AK2001); maxNumberOfShards = 100 forever; StateStoreMode.DData explicitly; shard type names and PersistenceId formats are durable vocabulary.",
+          "codeTag": "ch12-s02",
+          "codeChange": "Add Ohmline.ActorShell/Sharding/EntityMessageExtractor (HashCodeMessageExtractor, 100 shards; IHasEntityId-free: switch on known contract base types supplied per context); ShardOptions defaults (StateStoreMode.DData, Role 'charging'); WithShardRegion<ChargePointRegion>(\"charge-point\", ...), <ChargingSessionRegion>(\"charging-session\", ...), <SitePowerBudgetRegion>(\"site-power-budget\", ...), <ChargePointListingRegion>(\"charge-point-listing\", ...); add docs/adr/0009-durable-names.md. Create branch wrong/ch12-s02-actorref-as-identity (session stores IActorRef of its site; breaks on rebalance/restart)."
+        },
+        {
+          "number": 3,
+          "title": "Factories: domain versus actor",
+          "summary": "Props factories resolved through Akka.DependencyInjection, TimeProvider injected; the domain factory is still the decider's first arm.",
+          "codeTag": "ch12-s03",
+          "codeChange": "Change entity Props creation to resolver.Props<T>(entityId) with TimeProvider constructor injection; register TimeProvider.System in DI; tests use FakeTimeProvider."
+        },
+        {
+          "number": 4,
+          "title": "Passivation and remember-entities",
+          "summary": "Idle passivation (default 120s), Passivate with a custom stop message instead of Context.Stop(Self) or PoisonPill, why remember-entities disables passivation and is off for these aggregates. This is the lifecycle previewed in section 11.5.",
+          "codeTag": "ch12-s04",
+          "codeChange": "Add Ohmline.ActorShell/Sharding/Stop record (hand-off stop message) handled by DeciderActor; ShardOptions.HandOffStopMessage = Stop.Instance; PassivateIdleEntityAfter 2 minutes; RememberEntities false. Create branch wrong/ch12-s04-context-stop."
+        },
+        {
+          "number": 5,
+          "title": "Application services at the HTTP edge",
+          "summary": "Minimal APIs map a DTO to a command, Ask the region with an explicit timeout, and switch exhaustively to TypedResults (202 Accepted + Location, 409/422 ProblemDetails, 504 on timeout); options validated at startup; temporary development-only 'pretend charger' endpoints.",
+          "codeTag": "ch12-s05",
+          "codeChange": "Fill Ohmline.Charging.Api: ChargingEndpoints.MapChargingEndpoints (POST /charge-points, POST /charge-points/{id}/connectors/{n}/reservations, GET /charge-points/{id}; GET and PUT /charge-points/{id}/listing (PUT sends ReviseChargePointListing); POST /sessions, POST /sessions/{id}/meter-values, POST /sessions/{id}/stop) using IRequiredActor<ChargePointRegion> etc. and `Ask<CommandReply>(cmd, timeout)`; ChargingApiOptions validated with ValidateOnStart; DevScaffoldingEndpoints mapped only in Development (deleted in ch16-s07). Ohmline.SiteEnergy.Api: POST /sites (from SiteConfiguration), GET /sites/{id}/budget."
+        },
+        {
+          "number": 6,
+          "title": "Idempotency keys and read-your-writes",
+          "summary": "Idempotency-Key header becomes CommandId; a bounded recent-CommandId window in the shell state (and snapshot) returns the original reply for duplicates; reading the aggregate versus reading a lagging read model. The read-model side of read-your-writes is completed in section 14.1.",
+          "codeTag": "ch12-s06",
+          "codeChange": "DeciderActor keeps a bounded LRU of (CommandId -> CommandReply) of size 256, persisted in snapshots and rebuilt from events' CommandId on recovery; endpoints map Idempotency-Key to CommandId; tests for duplicate submission."
+        },
+        {
+          "number": 7,
+          "title": "Uniqueness across aggregates: the IdToken aggregate",
+          "summary": "'One active session per token' and 'a token belongs to one account' made trivially consistent by keying an aggregate on the token UID; the honest awkward-mapping sidebar (reservation aggregate vs unique constraint vs accept-and-compensate).",
+          "codeTag": "ch12-s07",
+          "codeChange": "Fill Ohmline.DriverAccounts.Contracts (commands RegisterToken, BlockToken, LockForSession, UnlockFromSession; replies TokenLocked, TokenLockRefused), Ohmline.DriverAccounts.Domain (IdToken : IDecider; events; `union IdTokenState(Unknown, Active, Blocked)` with ActiveSession), .Actors (IdTokenActor on DeciderActor, DriverAccountsSerializer Identifier 9103, region 'id-token'), .Api (POST /tokens, POST /tokens/{uid}/block); tests."
+        },
+        {
+          "number": 8,
+          "title": "The Knowledge Level in the cluster: the tariff book singleton",
+          "summary": "A persistent TariffBook as a cluster singleton with a proxy; publishing new tariff versions; sessions copy a TariffSnapshot at start.",
+          "codeTag": "ch12-s08",
+          "codeChange": "Fill Ohmline.Tariffs.Actors: TariffBook decider (commands PublishTariff, RetireTariff, GetTariffSnapshot in Tariffs.Contracts; decider in Tariffs.Domain), TariffBookActor on DeciderActor, TariffsSerializer (Identifier 9104), WithSingleton<TariffBookActor>(\"tariff-book\", ...) and WithSingletonProxy; GET /tariffs/{id} and POST /tariffs in Charging.Api or a small Tariffs endpoint group."
+        },
+        {
+          "number": 9,
+          "title": "Testing sharding locally with Akka.Hosting.TestKit",
+          "summary": "A single-node cluster in a test, port 0, the real AddChargingContext wiring, regions from the ActorRegistry; Hosting.TestKit 1.5.73 (>= 1.5.68 for parallel-run fixes).",
+          "codeTag": "ch12-s09",
+          "codeChange": "Add Akka.Hosting.TestKit to CPM; tests/Ohmline.Node.Tests with an Akka.Hosting.TestKit.TestKit subclass that calls AddChargingContext + AddSiteEnergyContext + AddDriverAccountsContext with in-memory persistence and self-join; tests sending commands via regions."
+        },
+        {
+          "number": 10,
+          "title": "Postgres and a multi-node cluster on your laptop with Aspire",
+          "summary": "An Aspire 13.6.4 AppHost with Postgres 17 and three Node replicas; ServiceDefaults bumped to net11.0; Akka.Persistence.Sql with ProviderName.PostgreSQL15 and tag-table mode; cluster formation via Akka.Aspire/Akka.Management (verify) or static seeds.",
+          "codeTag": "ch12-s10",
+          "codeChange": "Add src/Ohmline.AppHost (Aspire.AppHost.Sdk/13.6.4; Aspire.Hosting.PostgreSQL; postgres resource image tag 17, database 'ohmline'; Node with replicas 3 and WaitFor(db)), src/Ohmline.ServiceDefaults (health endpoints, service discovery, resilience; OpenTelemetry wiring left for ch17); Node switches to ProviderName.PostgreSQL15 when ConnectionStrings:ohmline is present (tagStorageMode TagTable, autoInitialize true for now); cluster bootstrap with Akka.Aspire if verified, otherwise static seed (first replica) documented in docs/adr/0010-local-cluster-formation.md."
+        },
+        {
+          "number": 11,
+          "title": "Integration tests against real Postgres",
+          "summary": "WebApplicationFactory plus Testcontainers.PostgreSql on Podman (DOCKER_HOST); 'state survives a restart'; an assembly fixture.",
+          "codeTag": "ch12-s11",
+          "codeChange": "Add Testcontainers.PostgreSql, Testcontainers.XunitV3, Microsoft.AspNetCore.Mvc.Testing to CPM; `public partial class Program;` in Node; tests/Ohmline.IntegrationTests with PostgresFixture (assembly fixture), ChargePointApiTests and RestartSurvivalTests (dispose factory, create new one, state still there)."
+        }
+      ]
+    },
+    {
+      "number": 13,
+      "part": "Part V: CQRS, Processes and Integration",
+      "slug": "cqrs-from-journal-to-read-model",
+      "title": "CQRS I: From Journal to Read Model",
+      "wordTarget": 8000,
+      "summary": "Answers questions without asking aggregates, and shows every moving part between a persisted event and a query result: why the write model cannot serve queries; the whole write -> journal -> query journal -> projection -> read store -> query API pipeline drawn as one diagram; tagging; Persistence Query (EventsByPersistenceId, EventsByTag, their Current* variants and PersistenceIds) with Akka.Persistence.Sql's global, exclusive offsets; a resumable projection runner with at-least-once delivery; idempotent upserts with the offset stored in the same database transaction; running exactly one projector per projection in the cluster; what happens when a projection fails and restarts; and the first read models behind a query API. Chapter 14 covers living with the resulting eventual consistency.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Why the write model cannot answer your questions",
+          "summary": "The 'ask every aggregate for the dashboard' anti-pattern (fan-out Asks, waking passivated entities, no query language over a journal of events); CQRS as separate models for writing and reading, not necessarily separate databases (Greg Young's definition), and why event sourcing makes it nearly unavoidable; the whole pipeline drawn as one mermaid diagram (command -> aggregate -> journal; journal -> query journal -> projection -> read store -> query endpoint) with the three places where latency and failure live; read-your-writes from the entity versus lagging views, previewing Chapter 14.",
+          "codeTag": null,
+          "codeChange": ""
+        },
+        {
+          "number": 2,
+          "title": "Tagging events",
+          "summary": "An IWriteEventAdapter that returns Tagged; tag design (charging, charging-session, site-energy) and why tags are durable vocabulary; TagTable mode in Akka.Persistence.Sql; the tags rows appear in the journal tour.",
+          "codeTag": "ch13-s02",
+          "codeChange": "Add Charging.Actors/Persistence/ChargingTagger and SiteEnergy.Actors/Persistence/SiteEnergyTagger (IWriteEventAdapter returning Tagged with tags per event type); register via journal builder AddWriteEventAdapter in each AddXxxContext; tests; extend JournalTourTests to assert the tags rows (ordering_id, tag, persistence_id, sequence_nr) written for a ChargePoint event."
+        },
+        {
+          "number": 3,
+          "title": "Persistence Query: the read side of the journal",
+          "summary": "The read journal as a stream API over the same tables: EventsByPersistenceId versus CurrentEventsByPersistenceId (live versus finite), EventsByTag and CurrentEventsByTag, PersistenceIds; the EventEnvelope (offset, persistence id, sequence number, event, timestamp); Akka.Persistence.Sql's offsets are the global ordering column and are exclusive; polling under the hood (refresh-interval and the journal-sequence-retrieval gap detection), which is where lag comes from (tuned in section 14.3); never dispose the shared system materializer in 1.5.",
+          "codeTag": "ch13-s03",
+          "codeChange": "Add Ohmline.Charging.ReadModels/Query/ReadJournalAccess (resolves the SqlReadJournal via PersistenceQuery.Get(system).ReadJournalFor<SqlReadJournal>(SqlReadJournal.Identifier)); create tests/Ohmline.Charging.ReadModels.Tests with ReadJournalTourTests on a temporary SQLite journal: CurrentEventsByPersistenceId returns one aggregate's events in sequence order; CurrentEventsByTag('charging', Offset.Sequence(n)) starts after n; a live EventsByTag stream picks up an event persisted after it started; CurrentPersistenceIds lists every entity; add to Ohmline.slnx."
+        },
+        {
+          "number": 4,
+          "title": "A resumable projection runner: offsets and at-least-once",
+          "summary": "A projection is a stream from a stored offset to a handler: load the offset, run EventsByTag from it, handle each envelope, store the new offset; RestartSource.OnFailuresWithBackoff and a UniqueKillSwitch; storing the offset after the handler gives at-least-once delivery, storing it before gives at-most-once and silently lost updates; a sequence diagram of a crash between the read-model write and the offset save.",
+          "codeTag": "ch13-s04",
+          "codeChange": "Fill Ohmline.Charging.ReadModels: ProjectionRunner (Akka.Streams source from EventsByTag with the stored offset, RestartSource.OnFailuresWithBackoff, UniqueKillSwitch, an IProjectionHandler whose HandleAsync receives the envelope and an open NpgsqlTransaction), NpgsqlOffsetStore (table read_models.projection_offsets(projection_id, last_offset, updated_at)); add Npgsql 10.0.3 to CPM; tables created by a small EnsureSchema for now (moved to the migrator in ch20); ProjectionRunnerTests (Category=Integration; Testcontainers Postgres for the offset store; resumes after the stored offset; a crash after the handler but before the offset save redelivers that envelope). Create branch wrong/ch13-s04-offset-before-handler (offset saved first; the same crash loses the update)."
+        },
+        {
+          "number": 5,
+          "title": "Idempotent read models: upserts and the offset in one transaction",
+          "summary": "Because delivery is at-least-once, every handler must tolerate duplicates: upsert keyed by the read model's own key and guarded by the source sequence number (update only if the incoming event is newer); the offset written in the same Npgsql transaction as the row so the two can never disagree; the per-row version that read-your-writes uses in section 14.1; SessionHistory as the first read model, with its row logic as a pure function.",
+          "codeTag": "ch13-s05",
+          "codeChange": "Add SessionHistoryProjection (projection id 'session-history-v1'; table read_models.session_history(session_id PK, token_uid, connector_id, status, energy_kwh, started_at, ended_at, last_sequence_nr); upsert with WHERE excluded.last_sequence_nr > session_history.last_sequence_nr; offset saved in the same transaction) and a pure SessionHistoryRow.Apply(row, event); tests: pure Apply tests and an Integration test delivering the same envelope twice that asserts one row and an unchanged last_sequence_nr."
+        },
+        {
+          "number": 6,
+          "title": "Running exactly one projector",
+          "summary": "A cluster singleton versus WithShardedDaemonProcess; partitioning projections by tag; what 'exactly one' means during a node failure (a short gap, never two writers to one offset row).",
+          "codeTag": "ch13-s06",
+          "codeChange": "Host projections with WithShardedDaemonProcess<ProjectionDaemon>(\"projections\", numberOfInstances: 1 per projection, ...) on role 'charging' (verify the 1.5.73 signature; fall back to WithSingleton) in AddChargingReadModels()."
+        },
+        {
+          "number": 7,
+          "title": "When a projection fails: restarts, poison events and lag",
+          "summary": "Transient failures (the database is down: back off and resume from the stored offset) versus permanent ones (a handler bug or an event it cannot handle: every restart fails on the same envelope, so the read model silently stops moving); choosing per projection between stopping loudly and recording and skipping; making a stuck projection visible by comparing its stored offset with the journal's highest ordering; restarting after a fix loses nothing, because the journal still holds every event.",
+          "codeTag": "ch13-s07",
+          "codeChange": "Add `union ProjectionFailurePolicy(StopAfterRetries, RecordAndSkip)` to ProjectionRunner (max restarts configurable); RecordAndSkip writes read_models.projection_failures(projection_id, persistence_id, sequence_nr, error, failed_at) in the offset transaction; GET /projections/status in Charging.Api (projection id, stored offset, journal max ordering, events behind); Integration tests with a handler that throws for one event under each policy."
+        },
+        {
+          "number": 8,
+          "title": "Read models people use: a site live board and a query API",
+          "summary": "SiteLiveBoard (connector status and current allocation per site, fed from two contexts' tags) and SessionHistory (per driver token); query endpoints are the end of the pipeline and never touch an aggregate.",
+          "codeTag": "ch13-s08",
+          "codeChange": "Add SiteLiveBoardProjection (projection id 'site-live-board-v1'; from charging and site-energy tags; table read_models.site_live_board) and query endpoints GET /sites/{id}/live-board and GET /tokens/{uid}/sessions in Charging.Api reading via Npgsql; tests."
+        }
+      ]
+    },
+    {
+      "number": 14,
+      "part": "Part V: CQRS, Processes and Integration",
+      "slug": "living-with-eventual-consistency",
+      "title": "CQRS II: Living with Eventual Consistency",
+      "wordTarget": 8000,
+      "summary": "Makes the lag between a write and a read a designed property instead of a surprise: read-your-writes using the version (sequence number) a command returns, a consistency choice for each screen, tuning and measuring projection lag, live push from projections with Server-Sent Events for browsers and SignalR for app clients (DistributedPubSub as the backplane), several read models built from one event stream including one shaped for the driver app that Chapter 19 consumes, testing projections, and a preview of rebuilding read models that Chapter 20 completes.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/mobile.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Read-your-writes with the version a command returns",
+          "summary": "The reply already carries Version, the aggregate's sequence number (section 10.4), and every session-history row stores last_sequence_nr (section 13.5), so a query can ask for 'at least version n': the server answers from the read model once it has caught up, waits briefly, or says honestly that it has not caught up yet; the alternative of asking the aggregate itself (consistent, but one entity at a time and it wakes passivated entities); a sequence diagram of POST /sessions/{id}/stop -> 202 with version 7 -> GET /sessions/{id}?minVersion=7.",
+          "codeTag": "ch14-s01",
+          "codeChange": "GET /sessions/{id} in Charging.Api accepts ?minVersion=; a ReadYourWrites helper polls the session_history row every 50 ms up to Ohmline:ReadModels:ReadYourWritesTimeout (default 2 s, validated on start) and returns 200 with the row and an ETag of its version, or 202 Accepted with Retry-After: 1 and the current version when it has not caught up; command endpoints return a Location header that includes ?minVersion=; Integration tests (stop a session, then read with minVersion; a paused projection forces the 202 path)."
+        },
+        {
+          "number": 2,
+          "title": "Consistency choices per screen",
+          "summary": "Not every screen needs the same guarantee: a decision table over Ohmline's screens (operator site live board: eventual and pushed; driver's active session: read-your-writes, then pushed; receipt: eventual with a 'being prepared' state; connector availability before reserving: ask the aggregate, because being wrong strands a driver at a blocked connector); the three tools (aggregate query, read model with a minimum version, plain read model) and their costs; UX language for lag ('updating…') and never fake certainty.",
+          "codeTag": "ch14-s02",
+          "codeChange": "Add docs/consistency-per-screen.md (table: screen, read source, guarantee, what the user sees while stale, owner)."
+        },
+        {
+          "number": 3,
+          "title": "Tuning and measuring projection lag",
+          "summary": "Where the default 500-1200 ms lag comes from (journal polling plus sequence-gap detection); tuning both refresh-interval and journal-sequence-retrieval.query-delay (tuning one alone does nothing); the database cost of low lag; measuring lag as the time between an event's journal timestamp and the commit of the projection that handled it, instead of guessing; the number feeds Chapter 18's dashboards.",
+          "codeTag": "ch14-s03",
+          "codeChange": "Tune journal query refresh-interval and journal-sequence-retrieval.query-delay in Node config from Ohmline:Projections:RefreshInterval and Ohmline:Projections:QueryDelay (defaults 100 ms/100 ms; validated on start); ProjectionRunner records the last handled event's timestamp and GET /projections/status reports lag; Integration test asserting a projected row appears within 1 s with the tuned settings."
+        },
+        {
+          "number": 4,
+          "title": "Live push with Server-Sent Events",
+          "summary": "Pushing live session progress to a browser with TypedResults.ServerSentEvents; the projection, not the aggregate, publishes after its transaction commits, so a pushed version is always queryable; DistributedPubSub carries the notification to whichever node holds the connection; a per-request subscriber actor; the event id is the version, so a reconnecting browser's Last-Event-ID says what it has already seen.",
+          "codeTag": "ch14-s04",
+          "codeChange": "Add WithDistributedPubSub(\"charging\"); SessionHistoryProjection publishes SessionSummaryChanged(SessionId, Version, Status, EnergyKwh) to topic 'session-summaries' after commit; GET /sessions/{id}/events SSE endpoint (TypedResults.ServerSentEvents) subscribing via a per-request subscriber actor, event id = version; tests."
+        },
+        {
+          "number": 5,
+          "title": "Live push to app clients with SignalR",
+          "summary": "Native clients want reconnects, groups and a .NET client with tracing: an ASP.NET Core SignalR hub on the Node with groups per session and per token, fed by a LiveUpdatesBridge actor subscribed to the same DistributedPubSub topics; DistributedPubSub is the backplane, so no Redis is needed and every node pushes to the clients connected to it; SignalR does not replay messages missed while disconnected, so every client pulls a catch-up after (re)connecting; SSE and SignalR compared in a table.",
+          "codeTag": "ch14-s05",
+          "codeChange": "Add Charging.Api/Live/ChargingHub (Hub mapped at /hubs/charging; JoinSession(sessionId) and JoinToken(tokenUid) add the connection to groups 'session-{id}' and 'token-{uid}') and a LiveUpdatesBridge actor (subscribes to 'session-summaries' and calls IHubContext<ChargingHub>.Clients.Group(...).SendAsync(\"sessionSummaryChanged\", dto)); Node calls AddSignalR() and maps the hub; add Microsoft.AspNetCore.SignalR.Client 11.0.0-rc.3.26522.148 to CPM for tests; IntegrationTests LiveHubTests (WebApplicationFactory; a HubConnection over the test server's handler; stop a session; receive sessionSummaryChanged with the new version)."
+        },
+        {
+          "number": 6,
+          "title": "Many read models from one stream, including one for the driver app",
+          "summary": "The same events feed different shapes for different readers: the operator's site live board, session history, and a read model shaped for one screen of the driver app (the active-session card and recent sessions per token, denormalised with the charge point listing's display name from section 11.7, plus a per-token change feed with an increasing position for catch-up); each projection has its own id, offset, failure policy and rebuild story; why a screen-shaped read model beats a generic API for a phone on a cellular link; the contract is still the server's to own (Chapter 19 extracts it into a Published Language).",
+          "codeTag": "ch14-s06",
+          "codeChange": "Add Charging.ReadModels/DriverApp/DriverAppProjection (projection id 'driver-app-v1'; tags 'charging-session' and 'charging'; tables read_models.driver_app_cards(token_uid, session_id, status, connector_id, charge_point_display_name, energy_kwh, started_at, ended_at, version; PK (token_uid, session_id)) and read_models.driver_app_feed(position bigserial, token_uid, session_id, version, payload jsonb)); it publishes DriverCardChanged to topic 'driver-app-cards' after commit and LiveUpdatesBridge forwards it to group 'token-{uid}' as \"driverCardChanged\"; endpoints GET /app/v1/tokens/{uid}/cards and GET /app/v1/tokens/{uid}/feed?after={position}&limit= in Charging.Api with DTOs in Charging.Api/App/Dtos; tests (pure handler tests; Integration: one session produces rows in all three read models)."
+        },
+        {
+          "number": 7,
+          "title": "Testing projections",
+          "summary": "Projection handlers as pure functions; replaying twice yields the same tables; integration tests against Testcontainers Postgres; Akka.Persistence.Query.InMemory for fast runner tests.",
+          "codeTag": "ch14-s07",
+          "codeChange": "Add Akka.Persistence.Query.InMemory to CPM; extend tests/Ohmline.Charging.ReadModels.Tests with pure handler tests for every projection and a fast ProjectionRunner test over the in-memory read journal; an IntegrationTests case that replays the same events twice and asserts identical rows in session_history, site_live_board and driver_app_cards."
+        },
+        {
+          "number": 8,
+          "title": "Rebuilding a read model: a preview",
+          "summary": "Because the journal keeps every event, any read model can be thrown away and rebuilt by resetting its offset or starting a new projection id; why the new version is built side by side instead of truncating the live table; what a rebuild costs (time proportional to events, load on the journal); versions taken from source sequence numbers survive a rebuild, while projection-local positions (the driver-app feed) do not, so clients must detect a new feed epoch. Section 20.9 completes this with SessionHistoryV2 and a configuration switch.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 15,
+      "part": "Part V: CQRS, Processes and Integration",
+      "slug": "process-managers-and-sagas",
+      "title": "Process Managers and Sagas",
+      "wordTarget": 7000,
+      "summary": "Coordinates work across aggregates and contexts: choreography first, then the ChargingJourney process manager as a pure state machine over a union of inputs from several contexts, hosted in a persistent sharded actor with timers, ports to other contexts, compensation, delivery guarantees and idempotency keys, and testing with virtual time.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Saga or process manager? Choreography first",
+          "summary": "Khononov's distinction, the EIP Process Manager, Vernon's Reactive Messaging Patterns; choreography where it suffices: a subscriber turns SessionEnded into ReleaseAllocation and UnlockFromSession via the ch08 policies.",
+          "codeTag": "ch15-s01",
+          "codeChange": "Add Charging.ReadModels/Policies/SessionEndedSubscriber (projection on tag 'charging-session' that runs ReleaseOnSessionEnded.React and sends the resulting commands to the site-power-budget and id-token regions; offset stored like any projection); tests."
+        },
+        {
+          "number": 2,
+          "title": "The charging journey as a pure state machine",
+          "summary": "union JourneyState(Started, AwaitingTokenLock, AwaitingHold, AwaitingAllocation, AwaitingEnergyFlow, Charging, Settling, Completed, Abandoned); a union of inputs drawn from several contexts' events (the best use of unions); Next(state, input) -> (state, effects) where effects are a union; the persisted start event carries its data.",
+          "codeTag": "ch15-s02",
+          "codeChange": "Add Charging.Domain/Journeys: `union JourneyInput(...)` over existing records from different places that share no base type: Charging session events, SiteEnergy.Contracts replies (AllocationGranted/AllocationQueued replies), DriverAccounts.Contracts replies (TokenLocked, TokenLockRefused), journey-owned port results (HoldPlaced, HoldDeclined, PaymentCaptured, CaptureFailed, ChargerAccepted, ChargerRejected) and JourneyTimerElapsed (Charging.Domain may reference other contexts' pure Contracts projects); JourneyState union; `union JourneyEffect(LockToken, PlaceHold, RequestAllocation, StartCharger, StartTimer, CancelTimer, ReleaseAllocation, VoidHold, CapturePayment, UnlockToken)`; ChargingJourney.Next; persisted JourneyEvent closed records (JourneyStarted, StepCompleted..., JourneyCompleted, JourneyAbandoned); GWT tests."
+        },
+        {
+          "number": 3,
+          "title": "The journey actor: persistent, sharded, with timers",
+          "summary": "Effects executed by the shell; persist before acting; timers re-armed from state in RecoveryCompleted; remember-entities on for journeys so in-flight journeys restart after a rebalance (trade-off: no passivation while active).",
+          "codeTag": "ch15-s03",
+          "codeChange": "Add Charging.Actors/Journeys/ChargingJourneyActor (ReceivePersistentActor + IWithTimers; maps incoming messages to JourneyInput, persists JourneyEvents, executes JourneyEffects via ports), region 'charging-journey' with RememberEntities = true; manifests for journey events in ChargingSerializer; POST /journeys endpoint (StartCharging: TokenUid + ConnectorId)."
+        },
+        {
+          "number": 4,
+          "title": "Ports to other contexts",
+          "summary": "IPaymentPort and IChargerCommandPort as interfaces resolved from DI; in-memory fakes for now (replaced in ch16); TestProbe autopilots as fake contexts in tests.",
+          "codeTag": "ch15-s04",
+          "codeChange": "Add Charging.Actors/Journeys/Ports: IPaymentPort (PlaceHold, Capture, Void returning Task<PaymentPortResult> piped back), IChargerCommandPort (RemoteStart/RemoteStop/SetChargingProfile); InMemoryPaymentPort and LoggingChargerCommandPort registered in Development."
+        },
+        {
+          "number": 5,
+          "title": "Timeouts and compensation",
+          "summary": "Energy-flow timeout releases the allocation, voids the hold and unlocks the token; capture failure retries with backoff then records DebtRecorded; compensations are domain events.",
+          "codeTag": "ch15-s05",
+          "codeChange": "Extend ChargingJourney.Next with timeout and failure arms (EnergyFlowTimedOut -> compensation effects; CaptureFailed -> retry with attempt count, then DebtRecorded event); actor handles retry scheduling; tests."
+        },
+        {
+          "number": 6,
+          "title": "Delivery guarantees and idempotency keys",
+          "summary": "At-most-once by default; idempotency keys derived from the journey id ('{journeyId}-hold'); idempotent receivers; Akka.Delivery (sharded producer/consumer controllers) for journey-to-site commands.",
+          "codeTag": "ch15-s06",
+          "codeChange": "Every effect carries an IdempotencyKey; SitePowerBudget and IdToken deciders ignore duplicate keys (state-based); add Akka.Delivery ShardingProducerController between journey and site-power-budget if the 1.5.73 API is verified, otherwise document in docs/adr/0011-delivery-guarantees.md and keep idempotent retries."
+        },
+        {
+          "number": 7,
+          "title": "Testing time-driven processes",
+          "summary": "Pure transition tables for Next; TestKit with TestScheduler and an Identify barrier for the actor's timers; never with clustering.",
+          "codeTag": "ch15-s07",
+          "codeChange": "Add tests: JourneyTransitionTableTests (TheoryData over (state, input) -> (state, effects)) and ChargingJourneyActorTests using akka.scheduler.implementation = Akka.TestKit.TestScheduler and TestProbe autopilots for ports."
+        },
+        {
+          "number": 8,
+          "title": "Hot and huge aggregates",
+          "summary": "Measuring the 300-connector depot during a curtailment; splitting by feeder or transformer; time-scoped aggregates (monthly fleet statement); when to relax an invariant with a corrective policy.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 16,
+      "part": "Part V: CQRS, Processes and Integration",
+      "slug": "integrating-bounded-contexts",
+      "title": "Integrating Bounded Contexts: Anticorruption Layers, Open Host and the Outbox",
+      "wordTarget": 9000,
+      "summary": "Connects contexts and external systems without corrupting the model: domain versus integration events with the journal as outbox, an Open Host notification feed, a deliberately simple Billing service, the TallyPay payment ACL, Charging-to-Billing as Customer/Supplier, the OCPP Device Gateway ACL with connection actors and a charger simulator, the Northgate Grid curtailment ACL, and system and contract tests.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Domain events versus integration events: the journal is the outbox",
+          "summary": "Integration events are closed records in the Published Language with explicit [JsonDerivedType(\"ohmline.charging.session-completed.v1\")] discriminators; a relay projection translates domain events into an outbox table; dual writes as the anti-pattern.",
+          "codeTag": "ch16-s01",
+          "codeChange": "Add Ohmline.Charging.Contracts/Integration: `closed record ChargingIntegrationEvent` with SessionCompleted (SessionId, TokenUid, ConnectorId, Energy kWh decimal, PriceBreakdown DTO, StartedAt, EndedAt) and explicit JsonDerivedType names; Charging.ReadModels/Outbox/IntegrationEventRelay projection writing to read_models.integration_outbox (offset bigserial). Create branch wrong/ch16-s01-dual-write."
+        },
+        {
+          "number": 2,
+          "title": "Open Host Service: a notification feed",
+          "summary": "An HTTP feed GET /feeds/charging?after={position}&limit= served from the outbox table (Vernon's notification log); Kafka via Akka.Streams.Kafka as a sidebar.",
+          "codeTag": "ch16-s02",
+          "codeChange": "Add FeedEndpoints in Charging.Api (paged JSON feed with next link, ETag) and docs/feeds.md."
+        },
+        {
+          "number": 3,
+          "title": "Billing, deliberately simple",
+          "summary": "A state-stored context with no actors: minimal API, Npgsql, an inbox that consumes the feed with a stored position (Idempotent Receiver), receipts written with a classic transactional outbox. Billing is also the book's example of a state-stored context, compared with the alternatives in section 11.7.",
+          "codeTag": "ch16-s03",
+          "codeChange": "Fill src/Billing/Ohmline.Billing (Web; Npgsql; schema billing.*: holds, invoices, inbox_position, outbox): ChargingFeedConsumer BackgroundService (poll, dedupe by SessionId, create invoice), HoldEndpoints (POST /holds, POST /holds/{id}/capture, POST /holds/{id}/void) and ReceiptsEndpoints; Ohmline.Billing.Contracts (request/response DTOs for the hold API); tests/Ohmline.Billing.Tests."
+        },
+        {
+          "number": 4,
+          "title": "The payment provider ACL",
+          "summary": "The fake TallyPay service (STATUS_CD codes, yyyyMMdd dates, a flaky mode); a typed HttpClient with resilience; a pure translator to union PaymentOutcome(Authorized, Declined, ProviderUnavailable); idempotency keys.",
+          "codeTag": "ch16-s04",
+          "codeChange": "Add tools/Ohmline.FakePsp (Web; TallyPay-style endpoints /v1/preauth, /v1/capture, /v1/void with FLAKY_RATE env var); Billing gets TallyPayClient (typed HttpClient + Microsoft.Extensions.Http.Resilience standard handler) and TallyPayTranslator returning PaymentOutcome union; add Microsoft.Extensions.Http.Resilience 10.11.0 to CPM; translator table tests."
+        },
+        {
+          "number": 5,
+          "title": "Charging to Billing: Customer/Supplier",
+          "summary": "The journey's payment port goes through Billing's API; timeouts and declines become journey inputs; the fake port is retired.",
+          "codeTag": "ch16-s05",
+          "codeChange": "Add Charging.Actors/Journeys/Ports/BillingPaymentPort (HttpClient to Billing via service discovery name 'billing', mapping responses to Billing.Contracts records consumed as JourneyInput); register instead of InMemoryPaymentPort outside unit tests; AppHost adds Billing and FakePsp with references."
+        },
+        {
+          "number": 6,
+          "title": "The Device Gateway: OCPP frames to domain commands",
+          "summary": "A simplified OCPP-1.6J-style subset (clearly labeled, not conformant); frames parsed into union OcppFrame(Call, CallResult, CallError); a pure Translate to union Translation(Translated, Ignored, Malformed); OCPP 'transaction' becomes Ohmline 'session'; vendor quirks normalized.",
+          "codeTag": "ch16-s06",
+          "codeChange": "Fill src/DeviceGateway/Ohmline.DeviceGateway.Ocpp: OcppFrameParser (System.Text.Json over JSON arrays [2,id,action,payload]), action payload records (BootNotification, Heartbeat, StatusNotification, Authorize, StartTransaction, MeterValues, StopTransaction; RemoteStartTransaction, RemoteStopTransaction, SetChargingProfile), OcppTranslator; tests/Ohmline.DeviceGateway.Ocpp.Tests with recorded frame fixtures including vendor quirks (Wh vs kWh)."
+        },
+        {
+          "number": 7,
+          "title": "Connection actors and the charger simulator",
+          "summary": "One ChargerConnectionActor per WebSocket (boot, heartbeats with timers, translation, forwarding through shard-region proxies: the Partnership); outbound RemoteStart/SetChargingProfile with correlation ids and timeouts; a runnable charger simulator; the development scaffolding endpoints are deleted.",
+          "codeTag": "ch16-s07",
+          "codeChange": "Fill src/DeviceGateway/Ohmline.DeviceGateway (Web; Akka cluster role 'gateway'; WithShardRegionProxy for charge-point, charging-session, charging-journey; /ocpp/{chargePointId} WebSocket endpoint creating ChargerConnectionActor; GatewayChargerCommandPort implementation reached from the journey via a 'charger-commands' region or DistributedPubSub topic per charge point); add tools/Ohmline.Simulator (console: N chargers, scenarios plug-in/charge/fault/disconnect); delete DevScaffoldingEndpoints; AppHost adds gateway and simulator."
+        },
+        {
+          "number": 8,
+          "title": "The grid operator ACL and a projection-fed dispatcher",
+          "summary": "Northgate Grid's demand-response signal becomes ApplyCurtailment; allocation changes reach chargers through a ChargingProfileDispatcher (at-least-once, idempotent by allocation version) that sends SetChargingProfile.",
+          "codeTag": "ch16-s08",
+          "codeChange": "Add tools/Ohmline.FakeGridOperator (Web; GET /signals?since= returning OpenADR-like events); src/SiteEnergy/Ohmline.SiteEnergy.Acl.GridOperator (GridSignalTranslator pure + GridSignalPoller actor with timers sending ApplyCurtailment/EndCurtailment to the site-power-budget region); Charging.ReadModels/Dispatch/ChargingProfileDispatcher projection on tag 'site-energy' sending SetChargingProfile via IChargerCommandPort with allocation version; tests."
+        },
+        {
+          "number": 9,
+          "title": "System tests with Aspire",
+          "summary": "The whole system end to end ('plug in, charge, get a receipt') with Aspire.Hosting.Testing; the launch-profile gotcha; WaitFor ordering.",
+          "codeTag": "ch16-s09",
+          "codeChange": "Add Aspire.Hosting.Testing to CPM; launchSettings.json profiles for Node, Gateway, Billing; tests/Ohmline.SystemTests (DistributedApplicationTestingBuilder over Ohmline.AppHost; runs one simulator scenario; asserts a receipt appears in Billing within a timeout)."
+        },
+        {
+          "number": 10,
+          "title": "Contract tests for the Published Language",
+          "summary": "Golden JSON per integration-event version; Billing's consumer expectations checked against Charging's contracts.",
+          "codeTag": "ch16-s10",
+          "codeChange": "Add tests/Ohmline.ContractTests (golden files for every ChargingIntegrationEvent and Billing.Contracts DTO; a consumer test deserializing the feed sample with Billing's reader)."
+        }
+      ]
+    },
+    {
+      "number": 17,
+      "part": "Part VI: Instrumentation and Telemetry",
+      "slug": "tracing-through-the-mailbox",
+      "title": "Tracing Through the Mailbox",
+      "wordTarget": 6500,
+      "summary": "Follows one charge as a single distributed trace: BCL diagnostics near the domain, OpenTelemetry 1.20.1 in ServiceDefaults and the Aspire dashboard, why trace context is lost at the mailbox, a W3C trace envelope, consumer spans in AroundReceive, persist/stash subtleties, parents versus links, testing traces, and Phobos as the buy option.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/telemetry.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Signals in .NET and observability as a port",
+          "summary": "ActivitySource, Meter (via IMeterFactory) and ILogger near the domain; the OTel SDK only in hosts; one source and one meter per context; the domain stays OTel-free.",
+          "codeTag": "ch17-s01",
+          "codeChange": "Add per-context diagnostics classes (Ohmline.Charging.Actors/Diagnostics/ChargingDiagnostics with ActivitySource 'Ohmline.Charging' and meter name constant; same for SiteEnergy, DriverAccounts, DeviceGateway, Billing)."
+        },
+        {
+          "number": 2,
+          "title": "Wiring OpenTelemetry into ServiceDefaults and the Aspire dashboard",
+          "summary": "OpenTelemetry 1.20.1: tracing, metrics and logs with OTLP; AddSource/AddMeter for every Ohmline source (forgetting them is the most common bug); service.version and deployment.environment.name resources; the Aspire dashboard.",
+          "codeTag": "ch17-s02",
+          "codeChange": "Add OpenTelemetry.Extensions.Hosting, Exporter.OpenTelemetryProtocol, Instrumentation.AspNetCore, .Http, .Runtime 1.20.1 to CPM; ServiceDefaults.ConfigureOpenTelemetry adds Ohmline.* sources/meters (wildcard 'Ohmline.*'), UseOtlpExporter when OTEL_EXPORTER_OTLP_ENDPOINT is set; all hosts call AddServiceDefaults."
+        },
+        {
+          "number": 3,
+          "title": "Why traces stop at the mailbox",
+          "summary": "With a plain Tell, Activity.Current inside the actor is null; a test proves it.",
+          "codeTag": "ch17-s03",
+          "codeChange": "Add tests/Ohmline.Telemetry.Tests (new project) with MailboxLosesTraceTests (ActivityListener + TestKit: Activity.Current is null in the receiving actor)."
+        },
+        {
+          "number": 4,
+          "title": "A W3C trace envelope",
+          "summary": "Traced<T>-style envelope carrying traceparent/tracestate; TellTraced/AskTraced; the shard extractor sees through it; an envelope serializer that embeds the inner serializer id, manifest and bytes.",
+          "codeTag": "ch17-s04",
+          "codeChange": "Add Ohmline.ActorShell/Tracing: TraceEnvelope(object Message, string TraceParent, string? TraceState), TraceEnvelopeSerializer (Identifier 9100, manifest 'ohmline.trace-envelope.v1'), extension members TellTraced/AskTraced on IActorRef; EntityMessageExtractor unwraps envelopes; endpoints and ports switch to the traced variants."
+        },
+        {
+          "number": 5,
+          "title": "Consumer spans in AroundReceive",
+          "summary": "A TracedPersistentActor base restores context and starts a CONSUMER span named 'process {ActorType}' with messaging.system.name and message type (union case names via IUnion); DeciderActor adopts it.",
+          "codeTag": "ch17-s05",
+          "codeChange": "Add Ohmline.ActorShell/Tracing/TracedPersistentActor (overrides AroundReceive to unwrap TraceEnvelope, start Activity with ActivityKind.Consumer and semantic-convention tags) and make DeciderActor and ChargingJourneyActor derive from it; ChargerConnectionActor uses a TracedReceiveActor variant."
+        },
+        {
+          "number": 6,
+          "title": "Stash, persist and the double count",
+          "summary": "Stashed commands pass through AroundReceive twice; a handler-invoked flag fixes counts; a retroactive persist span with an explicit start time; an 'apply' span keeps logs and replies correlated.",
+          "codeTag": "ch17-s06",
+          "codeChange": "Add handler-invoked flag to TracedPersistentActor; PersistTraced/PersistAllTraced helpers recording a 'persist {EventType}' span with explicit start time and an 'apply' span around the callback; tests for single counting."
+        },
+        {
+          "number": 7,
+          "title": "Parents versus links",
+          "summary": "Parent spans for request/response; links for projections, the feed relay, subscribers and journey timers; messaging.message.conversation_id carries the journey id; one trace from an OCPP frame to the receipt. Chapter 19 extends the same trace back to a tap on the driver's phone.",
+          "codeTag": "ch17-s07",
+          "codeChange": "Projection runner and SessionEndedSubscriber create spans with ActivityLinks to the traceparent stored in event metadata (add a TraceParent field to the journal via a write adapter wrapper or event metadata record); journey timer spans link to the starting span; conversation_id tag set from JourneyId."
+        },
+        {
+          "number": 8,
+          "title": "Testing traces",
+          "summary": "OpenTelemetry InMemory exporter assertions on parent/child and link relationships across Tell, Ask, persist and projections.",
+          "codeTag": "ch17-s08",
+          "codeChange": "Add OpenTelemetry.Exporter.InMemory to CPM; Ohmline.Telemetry.Tests TraceShapeTests (HTTP -> region -> actor -> persist parent/child; projection link)."
+        },
+        {
+          "number": 9,
+          "title": "Buy versus build: Phobos",
+          "summary": "What Phobos 2.12.1 automates (Tell, Ask, PipeTo, Streams, Sharding), how it is licensed and distributed, and the evaluation criteria.",
+          "codeTag": "ch17-s09",
+          "codeChange": "Add docs/adr/0012-manual-tracing-and-phobos-criteria.md."
+        }
+      ]
+    },
+    {
+      "number": 18,
+      "part": "Part VI: Instrumentation and Telemetry",
+      "slug": "metrics-logs-health",
+      "title": "Metrics, Logs, Health Checks and Dashboards",
+      "wordTarget": 6500,
+      "summary": "Completes the telemetry picture: domain metrics with a cardinality budget, actor and cluster metrics, metric tests, correlated logs, health checks that tell the truth, .NET 11's AddTracing, a production-shaped local stack (Collector, Prometheus OTLP, Grafana), Petabridge.Cmd, and SLOs derived from domain events.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/telemetry.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Domain metrics with a cardinality budget",
+          "summary": "Commands processed and rejected (reason tag from the error union case name), sessions started, energy delivered in kWh as a business metric, site allocation utilization; no entity ids or actor paths as tags.",
+          "codeTag": "ch18-s01",
+          "codeChange": "Add ChargingMetrics and SiteEnergyMetrics (IMeterFactory-created meters; counters ohmline.charging.commands, ohmline.charging.commands.rejected{reason}, ohmline.charging.sessions.started; histogram ohmline.charging.energy.delivered (kWh) with explicit buckets; observable gauge ohmline.site_energy.allocation.utilization); DeciderActor records via hooks. Create branch wrong/ch18-s01-high-cardinality-tags."
+        },
+        {
+          "number": 2,
+          "title": "Actor and cluster metrics",
+          "summary": "Mailbox depth (and its caveats), a shard-statistics poller, dead letters, recovery duration, actor lifecycle counters.",
+          "codeTag": "ch18-s02",
+          "codeChange": "Add Ohmline.ActorShell/Telemetry: DeadLetterMetricsListener (subscribes to DeadLetter on EventStream), ShardStatsPoller actor (GetClusterShardingStats on a timer -> observable gauges per type name), RecoveryDuration histogram in DeciderActor (recording the measurement added in ch11-s01)."
+        },
+        {
+          "number": 3,
+          "title": "Testing metrics",
+          "summary": "MetricCollector<T> with IMeterFactory from Microsoft.Extensions.Diagnostics.Testing.",
+          "codeTag": "ch18-s03",
+          "codeChange": "Add Microsoft.Extensions.Diagnostics.Testing 10.11.0 to CPM; MetricTests in Ohmline.Telemetry.Tests."
+        },
+        {
+          "number": 4,
+          "title": "Logs that correlate",
+          "summary": "ConfigureLoggers(s => s.AddLoggerFactory()) plus AddAkkaTraceCorrelation(); source-generated [LoggerMessage] logs; the Akka.Actor.ActorSystem category gotcha.",
+          "codeTag": "ch18-s04",
+          "codeChange": "Node and Gateway configure Akka logging through Microsoft.Extensions.Logging with trace correlation; add LoggerMessage partial classes (ChargingLog, GatewayLog) and replace ad-hoc log calls; test that actor logs carry the TraceId."
+        },
+        {
+          "number": 5,
+          "title": "Health checks that tell the truth",
+          "summary": "Liveness (WithActorSystemLivenessCheck) versus readiness (cluster readiness plus WithConnectivityCheck: the plain journal check stays Healthy with Postgres down); explicit tags; endpoints mapped in every environment; no Akka.HealthCheck packages.",
+          "codeTag": "ch18-s05",
+          "codeChange": "Wire Akka.Hosting health checks with explicit tags (live, ready); journal/snapshot WithConnectivityCheck under 'ready'; ServiceDefaults maps /health/live and /health/ready in all environments (not only Development); integration test stops the Postgres container and expects /health/ready Unhealthy."
+        },
+        {
+          "number": 6,
+          "title": ".NET 11 AddTracing and ActivitySourceFactory",
+          "summary": "The new services.AddTracing() and ActivitySourceFactory (note the missing `using Microsoft.Extensions.Diagnostics.Tracing;` in the docs); how they interact with the OTel SDK (verify before writing); when to adopt.",
+          "codeTag": "ch18-s06",
+          "codeChange": "Add docs/adr/0013-dotnet11-addtracing.md and, if verified compatible, switch ChargingDiagnostics to obtain its ActivitySource from ActivitySourceFactory with a test."
+        },
+        {
+          "number": 7,
+          "title": "Production-shaped telemetry locally",
+          "summary": "OTLP to an OpenTelemetry Collector (0.142.0), Prometheus 3 with --web.enable-otlp-receiver, Grafana via grafana/otel-lgtm; PromQL name translation; a dashboard for the domain metrics.",
+          "codeTag": "ch18-s07",
+          "codeChange": "Add deploy/observability/compose.yaml (otel collector 0.142.0, grafana/otel-lgtm), collector-config.yaml, dashboards/ohmline-charging.json; docs/observability.md with podman compose instructions."
+        },
+        {
+          "number": 8,
+          "title": "Petabridge.Cmd, bound safely",
+          "summary": "Cluster and sharding commands for operators; bind to localhost (default 0.0.0.0:9110) and expose only through port-forwarding.",
+          "codeTag": "ch18-s08",
+          "codeChange": "Add Petabridge.Cmd.Host, Petabridge.Cmd.Cluster, Petabridge.Cmd.Cluster.Sharding 1.5.2 to CPM; Node and Gateway call AddPetabridgeCmd with host 127.0.0.1 and the cluster/sharding palettes."
+        },
+        {
+          "number": 9,
+          "title": "SLOs from the domain",
+          "summary": "A 'time to energy flow' SLI computed from journey events; error-budget alerting rules.",
+          "codeTag": "ch18-s09",
+          "codeChange": "Add ohmline.charging.journey.time_to_energy_flow histogram recorded by ChargingJourneyActor; deploy/observability/alerts/ohmline-slo.yaml (Prometheus rule) and dashboard panel."
+        }
+      ]
+    },
+    {
+      "number": 19,
+      "part": "Part VII: The Mobile Edge",
+      "slug": "mobile-edge-maui",
+      "title": "The Mobile Edge: An Offline-First .NET MAUI Driver App",
+      "wordTarget": 8000,
+      "summary": "Answers the question 'does any of this belong in the mobile app, or only on the API side?' by building Ohmline's driver app with .NET MAUI. The domain (aggregates, invariants, event sourcing, actors) stays on the server; the app is its own bounded context downstream of the server's Open Host Service and speaks only a Published Language of shared client contracts, never aggregates. What does pay off on the phone: the ubiquitous language in the UI, value objects for input validation, client-generated command ids that the aggregate deduplicates, a durable SQLite outbox of pending commands drained by a single-reader Channel 'mailbox', a local SQLite cache of read models fed by the query side and SignalR, optimistic UI reconciled against server versions, and C# 15 unions for screen and command state. Persistence and CQRS on the server and on the phone are compared side by side; the chapter explains why Akka.NET does not belong on the phone today and when local-first event sourcing on the device is the right exception; and one trace runs from a tap on the phone to the journal. The client logic is a plain net11.0 library tested in the root solution; the thin MAUI head lives in its own solution under mobile/ and is built for net11.0-android at every tag from ch19-s04 on.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/mobile.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/telemetry.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/ddd-canon.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "Where the domain lives: the driver app as its own bounded context",
+          "summary": "The question and the answer: aggregates, invariants, event sourcing and actors stay on the server, where the single writer decides; the phone is a separate bounded context (Driver App) with its own language ('pending', 'syncing', 'failed to sync', 'offline'), downstream of the server's Open Host Service in a Customer/Supplier relationship, with a thin Anticorruption Layer in the client; the five reasons not to ship aggregates to the device (an untrusted client, version skew across app-store releases, the device sees projections not event streams, a different consistency model, trimming and packaging); what the device does own.",
+          "codeTag": "ch19-s01",
+          "codeChange": "Update docs/context-map.md (Driver App context; OHS/PL and Customer/Supplier edges; the artifact per relationship); add docs/canvases/bc-driver-app.md and docs/adr/0014-the-domain-stays-on-the-server.md; add Driver App terms (pending command, failed to sync, offline, read-model cache) to docs/glossary.md."
+        },
+        {
+          "number": 2,
+          "title": "A Published Language for client apps",
+          "summary": "Extracting the driver-facing HTTP contract into a project the app can reference without pulling in the server: plain DTOs with primitive fields (a connector as its printed form 'OHM-SLC-0042/1', amounts as decimal plus a currency code), a CommandId on every request, CommandAcceptedDto(CommandId, Version), RejectionCodes as stable strings, read-model and notification DTOs, and a source-generated JsonSerializerContext so serialization is trim- and AOT-safe on the device; no reference to SharedKernel (the server's Shared Kernel is not the phone's); the HTTP mapping (202 with CommandAcceptedDto; 409/422 ProblemDetails carrying a code; 503/504 as transient); additive versioning rules (add fields, never rename; the server tolerates missing fields, the client tolerates unknown codes).",
+          "codeTag": "ch19-s02",
+          "codeChange": "Create src/Charging/Ohmline.Charging.Client.Contracts (classlib; IsAotCompatible true; no ProjectReferences and no packages) with Requests (StartChargingRequest(CommandId, JourneyId, ConnectorId, TokenUid, SpendCapAmount, Currency), StopChargingRequest, ReserveConnectorRequest), Replies (CommandAcceptedDto), RejectionCodes, read models (DriverSessionCard, DriverFeedEntry, ChargePointListingDto) and notifications (SessionSummaryChanged, DriverCardChanged, moved here from Charging.Api/App/Dtos), ChargingClientJsonContext ([JsonSerializable] for every type) and README.md (versioning rules); Charging.Api's /app/v1 endpoints (POST /app/v1/journeys, POST /app/v1/sessions/{id}/stop, POST /app/v1/charge-points/{id}/connectors/{n}/reservations, and the cards, feed and GET /app/v1/charge-points/{id}/listing reads) use these DTOs and translate them to internal commands; ArchitectureTests: Client.Contracts references nothing; ContractTests: golden JSON for every client DTO; add to Ohmline.slnx under /src/Charging."
+        },
+        {
+          "number": 3,
+          "title": "Commands you can send twice",
+          "summary": "The phone cannot tell 'not done' from 'done, but the answer was lost' (an Ask timeout, a dropped cellular response), so it must retry with the same CommandId and the server must deduplicate; the aggregates already do (section 12.6: the recent-CommandId window rebuilt from events), the journey becomes idempotent through its client-generated JourneyId, and the single writer makes check-then-persist race-free with no locks; the contract written down (the server remembers ids for longer than the app retries: the window size versus the app's 24-hour maximum outbox age); commutative commands that need only deduplication versus commands that depend on what the driver saw and carry an expected version with a 'stale' rejection.",
+          "codeTag": "ch19-s03",
+          "codeChange": "ChargingJourney: StartCharging for an existing journey with the same CommandId replies with the original acceptance and records nothing, and a different CommandId for the same JourneyId is rejected 'journey-exists'; /app/v1 endpoints copy the body's CommandId into the command and reject an Idempotency-Key header that differs from it with 400; add docs/idempotency-contract.md; tests: the same StartCharging three times with a journey restart in between yields one JourneyStarted (Akka.Hosting.TestKit with a SQLite journal), and a duplicate StopCharging after a node restart returns the same Version (IntegrationTests)."
+        },
+        {
+          "number": 4,
+          "title": "A plain core library and a thin MAUI head",
+          "summary": "Splitting the app so that nearly all of it is testable on any machine: Ohmline.Mobile.Core is a plain net11.0 library (IsAotCompatible; CommunityToolkit.Mvvm; the client contracts; no MAUI reference) that holds view models, the API client, and later the outbox, cache and sync; Ohmline.Mobile is a thin .NET MAUI head (pages, DI, platform adapters) targeting net11.0-android always and iOS, Mac Catalyst and Windows only on hosts that can build them; the head's solution lives in mobile/ so a bare dotnet build at the root never needs MAUI workloads (two solutions at the root fail with MSB1011); the first screen, a charge point's listing, loaded through a typed HttpClient; building the Android package on Linux (the maui-android workload, an Android SDK and a JDK) and what a reader without them sees (NETSDK1208 for the mobile solution only).",
+          "codeTag": "ch19-s04",
+          "codeChange": "Add CommunityToolkit.Mvvm 8.4.2, Microsoft.Maui.Controls 11.0.0-rc.2.26505.5 and Microsoft.Extensions.Logging.Debug 11.0.0-rc.3.26522.148 to CPM; create src/Mobile/Ohmline.Mobile.Core (net11.0; IsAotCompatible true; references Ohmline.Charging.Client.Contracts and CommunityToolkit.Mvvm only) with Api/ChargingApiClient (typed HttpClient using ChargingClientJsonContext), Listings/ChargePointListingViewModel ([ObservableProperty] partial properties, [RelayCommand] LoadAsync), Platform/IConnectivity and Platform/IAppDispatcher; tests/Ohmline.Mobile.Core.Tests (fake HttpMessageHandler); add both to Ohmline.slnx (/src/Mobile, /tests). Create mobile/Directory.Build.props and mobile/Directory.Build.targets (import the root files; clear TargetFramework), mobile/Ohmline.Mobile (UseMaui true; TargetFrameworks net11.0-android, plus net11.0-ios;net11.0-maccatalyst when building on macOS and net11.0-windows10.0.19041.0 on Windows; SupportedOSPlatformVersion 24.0 for Android; MauiProgram registering Core services and an HttpClient whose BaseAddress comes from embedded appsettings.json, 10.0.2.2 for the Android emulator; AppShell; ListingPage.xaml bound to ChargePointListingViewModel; MauiConnectivity adapter), mobile/Ohmline.Mobile.slnx (Client.Contracts, Mobile.Core, Mobile.Core.Tests and the head) and mobile/README.md; ArchitectureTests: Mobile.Core references no server project except Client.Contracts and no Akka, Microsoft.Maui or ASP.NET Core server assembly; tools/verify-tags.sh also runs `dotnet build mobile/Ohmline.Mobile.slnx -warnaserror` at every tag where that file exists (and fails loudly if ANDROID_HOME or JAVA_HOME is unset, unless OHMLINE_SKIP_MOBILE=1)."
+        },
+        {
+          "number": 5,
+          "title": "The ubiquitous language on the phone: value objects and unions",
+          "summary": "The start-charging screen speaks Ohmline's language: the driver scans or types the connector label ('OHM-SLC-0042/1'), chooses a spend cap, and sees rejections as domain sentences ('This connector is reserved for another driver'), never '409'; client-side value objects (ConnectorCode, SpendCap) turn bad input into messages before a command exists, duplicating the server's rules on purpose for fast feedback while the server stays authoritative; union ScreenState(Loading, Ready, Offline, Failed) and union CommandStatus(Queued, Sending, Accepted, Rejected, FailedToSync) let the compiler enforce that every state is rendered (CS8509 is an error in the app too); CommunityToolkit.Mvvm partial properties on C# 15; Guid.CreateVersion7 command ids created at the tap.",
+          "codeTag": "ch19-s05",
+          "codeChange": "Add Mobile.Core/Charging: ConnectorCode and SpendCap (readonly record structs whose TryParse returns a client-side `union ParseResult<T>(Parsed<T>, Invalid)`), the ScreenState and CommandStatus unions, RejectionText (maps every RejectionCodes value to a driver-facing sentence, with a fallback for unknown codes) and StartChargingViewModel (validates input, builds a StartChargingRequest with Guid.CreateVersion7 ids and, for now, sends it directly through ChargingApiClient); the head adds StartChargingPage.xaml with one template per ScreenState case; tests: value-object tables, every RejectionCodes value has text, the unknown-code fallback, view-model state transitions."
+        },
+        {
+          "number": 6,
+          "title": "Offline first: a durable outbox drained by a mailbox",
+          "summary": "In the underground car park at the depot the phone has no signal, so 'start charging' must survive a dead network and a killed app: the command is written to a SQLite outbox before any network call (INSERT OR IGNORE makes a double tap harmless), and one dispatcher drains it through a Channel with a single reader, the actor shape without an actor framework; a SendOutcome union (Accepted, Rejected, TransientFailure): accepted rows record the server's version, rejected rows are terminal and never retried, and a transient failure stops the drain to keep per-device order; backoff with jitter, nudges from connectivity changes and app resume, and a 24-hour maximum age before 'failed to sync'; the outbox is the phone's only durable record of intent.",
+          "codeTag": "ch19-s06",
+          "codeChange": "Add Microsoft.Data.Sqlite to Ohmline.Mobile.Core (the repo's CPM version); Mobile.Core/Outbox: SqliteOutbox (WAL; table outbox(command_id TEXT PRIMARY KEY, kind, aggregate_key, payload, created_utc, attempts, status, version, code, reason, trace_parent)), OutboxDispatcher (Channel<Signal> with SingleReader = true; Nudge(); DrainAsync stops at the first transient failure; PeriodicTimer backoff with jitter; StatusChanged marshalled through IAppDispatcher), the SendOutcome union and HttpCommandSender (maps 202, 409/422, 503/504 and network errors); StartChargingViewModel enqueues instead of sending; the head passes a connection string for Path.Combine(FileSystem.AppDataDirectory, \"ohmline-driver.db3\"), nudges on ConnectivityChanged, stops the dispatcher on Window.Stopped and restarts and nudges it on Resumed; tests: survives reopening the database, retries with the same CommandId, a rejection is terminal and does not block later commands, a transient failure preserves order, a double tap enqueues once, rows older than 24 hours become FailedToSync."
+        },
+        {
+          "number": 7,
+          "title": "Read models on the device: a cache, live updates and optimistic UI",
+          "summary": "The driver's active-session card comes from the server's driver-app read model (section 14.6), cached in SQLite on the phone with a version-guarded upsert so duplicated or out-of-order pushes are harmless; a SignalR HubConnection with WithAutomaticReconnect, a retry loop for the initial start, and a re-join of the token group plus a pull from the feed after Reconnected and Resumed, because SignalR does not replay missed messages; optimistic UI without lying: a pending overlay from the outbox stays until the cached read model's version reaches the version the server accepted; what the driver sees when a queued command is rejected.",
+          "codeTag": "ch19-s07",
+          "codeChange": "Add Microsoft.AspNetCore.SignalR.Client to Ohmline.Mobile.Core (version already in CPM from ch14-s05); Mobile.Core/ReadModels: SqliteReadModelCache (tables session_card(token_uid, session_id, version, json) with an UPDATE ... WHERE version < @v upsert, and feed_position), FeedCatchUp (GET /app/v1/tokens/{uid}/feed?after=), LiveUpdatesClient (an ILiveUpdates over HubConnection: JoinToken, handlers for driverCardChanged and sessionSummaryChanged, reconnect handling and an initial-start retry loop) and SessionCardViewModel (merges the cached card with pending outbox rows: overlay while Queued or Sending, or Accepted with a version above the cached one); the head starts and stops LiveUpdatesClient with the window lifecycle; tests: upsert-if-newer, the overlay disappears when the pushed version catches up, catch-up after a simulated reconnect, a rejected command surfaces its RejectionText; an IntegrationTests case connecting LiveUpdatesClient to the Node's hub over WebApplicationFactory."
+        },
+        {
+          "number": 8,
+          "title": "One trace from tap to journal",
+          "summary": "Extending Chapter 17's trace to the phone: the tap starts a span from an 'Ohmline.Mobile' ActivitySource in Mobile.Core (BCL only, like the server's diagnostics classes); its traceparent is stored with the outbox row, so a command sent three hours later, after the phone came back online, still traces to the tap (each send attempt a child span, or a link after an app restart); HttpClient instrumentation injects traceparent, ASP.NET Core extracts it, and the trace envelope (section 17.4) carries it through the shard region into the actor's consumer and persist spans; SignalR client invocations carry it in hub message headers (ActivitySource 'Microsoft.AspNetCore.SignalR.Client'), but pushes do not parent client work, so DriverCardChanged carries the projection span's traceparent and the client links its redraw to it; the OpenTelemetry SDK lives only in the head and is started explicitly, because MAUI never starts hosted services; privacy (no user input in attributes) and sampling for many phones; the Aspire dashboard and a dev tunnel for an emulator.",
+          "codeTag": "ch19-s08",
+          "codeChange": "Add Mobile.Core/Diagnostics/MobileDiagnostics (ActivitySource 'Ohmline.Mobile'); StartChargingViewModel starts a 'tap start-charging' span, SqliteOutbox stores trace_parent, OutboxDispatcher starts each send attempt as a child span (a link when the process restarted since the tap); DriverCardChanged in Client.Contracts gains an optional TraceParent (additive; golden file updated) that DriverAppProjection fills; the head adds OpenTelemetry tracing (AddSource(\"Ohmline.Mobile\", \"Microsoft.AspNetCore.SignalR.Client\"), HttpClient instrumentation, OTLP exporter only when an endpoint is configured) and resolves the TracerProvider after building the MauiApp (verify that this is sufficient without hosted services); tests/Ohmline.Telemetry.Tests TapToJournalTraceTests (Mobile.Core's dispatcher sends a queued StartCharging to an in-process Node via WebApplicationFactory; the InMemory exporter shows one trace id from the tap span through the HTTP server span to the journey actor's consumer and persist spans; a retry after a simulated restart produces a link). If Aspire.Hosting.Maui 13.6.4-preview.1.26523.11 is verified, the AppHost adds AddMauiProject(\"mobile\", ...) with an Android emulator and WithOtlpDevTunnel() behind the IncludeMobile=true configuration flag; otherwise docs/observability.md gains a section on pointing the app at the dashboard's OTLP endpoint."
+        },
+        {
+          "number": 9,
+          "title": "Persistence and CQRS: the server versus the phone",
+          "summary": "A side-by-side table of what each side stores and why. On the server the journal is the source of truth, events and snapshots are kept, aggregates decide, projections derive read models, and the single writer is a sharded actor. On the phone nothing is the source of truth: the read-model cache is disposable (delete it and refill it from the server), the outbox is the only durable intent and holds commands rather than events, the app validates input but decides nothing, and the single reader is a Channel loop. Further rows: consistency (authoritative and immediate versus provisional until accepted), identity (sequence numbers versus client command ids and server versions), schema evolution (events forever versus a cache you can drop and an outbox you must drain or migrate across app upgrades), failure (supervision and recovery versus process death at the operating system's whim). The rule both sides share: commands are intent, events are fact, and only the server writes facts.",
+          "codeTag": null,
+          "codeChange": ""
+        },
+        {
+          "number": 10,
+          "title": "Should the phone run actors? Local-first as the exception",
+          "summary": "The evidence: Akka.NET 1.5.73 runs under MAUI's default partial trimming but fails under full trimming and NativeAOT (ConfigurationErrorsException from System.Configuration inside ActorSystem.Create, measured on linux-x64), which AOT-compiled deployments such as iOS need; Akka.Hosting relies on hosted services that MAUI never starts, so AddAkka is unavailable; about 2.4 MB of extra assemblies and a scheduler that ticks every 10 ms; a process the OS may kill whenever it is in the background. The 1.6 betas trim and AOT-compile a trivial actor cleanly, and MAUI hosting support is in a draft pull request. The verdict: actor thinking yes, actor framework no on phones; a local actor system is reasonable on kiosks, desktops and edge boxes (a depot site controller on mains power and a trusted LAN). The genuine exception is local-first: when a device must decide while disconnected and its decisions must stand (a field technician's inspection log in a basement, collaborative offline edits), the device owns its own aggregate and event log and merges with CRDTs or server-side reconciliation; Ohmline's driver commands are not that case, because their invariants (one session per connector, the site's power budget) live in shared state no phone can see.",
+          "codeTag": null,
+          "codeChange": ""
+        }
+      ]
+    },
+    {
+      "number": 20,
+      "part": "Part VIII: Operations, Releases and Versioning",
+      "slug": "events-are-forever",
+      "title": "Events Are Forever: Evolving Schemas, Snapshots and Read Models",
+      "wordTarget": 7000,
+      "summary": "Changes the model without rewriting history: what is really in the journal and which contracts never die, tolerant readers and expand/contract, upcasting in the serializer and with read adapters, a golden corpus, snapshot versioning, renaming a concept, owning the journal schema with migrations, rebuilding read models and versioning the Published Language, and retention, privacy and backups.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/csharp-dotnet11.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "What is really in your journal, and the contracts that never die",
+          "summary": "Three schemas (domain event, persisted representation, wire message); permanent things: manifests, serializer ids, PersistenceId formats, shard type names, maxNumberOfShards; the Postgres counterpart of the SQLite journal tour in section 10.8.",
+          "codeTag": "ch20-s01",
+          "codeChange": "Add tools/Ohmline.JournalInspect (console: reads journal rows from Postgres or SQLite and prints persistence_id, sequence_nr, serializer_id, manifest, payload JSON) reusing the SELECT statements from the ch10-s08 journal tour, and docs/contracts-that-never-die.md."
+        },
+        {
+          "number": 2,
+          "title": "Tolerant readers and expand/contract",
+          "summary": "Add only optional fields; deploy the read path before the write path; adding PhaseCount to SessionStarted.",
+          "codeTag": "ch20-s02",
+          "codeChange": "Add nullable `int? PhaseCount` to SessionStarted (default handling in Evolve), serializer options tolerant of missing/extra members; golden file for the old shape still passes; docs/adr/0015-event-evolution-rules.md."
+        },
+        {
+          "number": 3,
+          "title": "Upcasting inside the serializer",
+          "summary": "MeterValueRecorded.v1 (integer Wh register) becomes v2 (Energy kWh plus measurand phase); v1 bytes upcast in FromBinary by manifest.",
+          "codeTag": "ch20-s03",
+          "codeChange": "Introduce MeterValueRecorded v2 shape; ChargingSerializer writes 'charging.meter-value-recorded.v2' and maps the v1 manifest to an Upcaster that converts Wh to kWh; tests with the frozen v1 golden bytes."
+        },
+        {
+          "number": 4,
+          "title": "Upcasting with read event adapters",
+          "summary": "The IReadEventAdapter alternative for rows from before you owned the serializer; splitting one old event into two; EventSequence.Empty; trade-off table.",
+          "codeTag": "ch20-s04",
+          "codeChange": "Add Charging.Actors/Persistence/LegacyEventsReadAdapter (IReadEventAdapter) handling a demonstration legacy manifest; registered via AddReadEventAdapter; tests. Create branch alt/ch20-s04-adapter-only (upcast done purely via read adapter)."
+        },
+        {
+          "number": 5,
+          "title": "The golden corpus",
+          "summary": "Committed bytes for every manifest version, deserialized in CI forever; a reflection test that every persisted type has a manifest.",
+          "codeTag": "ch20-s05",
+          "codeChange": "Add tests/golden/corpus/<manifest>.json for every manifest ever written (v1 and v2) and CorpusTests (every file deserializes; every type deriving from persisted base types is registered)."
+        },
+        {
+          "number": 6,
+          "title": "Snapshots are a cache",
+          "summary": "Snapshot manifests and versions; discarding an unreadable snapshot and falling back to replay (snapshot-is-optional).",
+          "codeTag": "ch20-s06",
+          "codeChange": "Add ChargePointSnapshot v2 (connector reservations with expiry offsets), manifest 'charging.charge-point-snapshot.v2', v1 still readable; DeciderActor treats unknown snapshot versions as absent; enable snapshot-is-optional in config; tests."
+        },
+        {
+          "number": 7,
+          "title": "Renaming a concept when events are forever",
+          "summary": "Operations stops saying 'fault' and starts saying 'out of order': rename ConnectorFaulted to ConnectorOutOfOrder in the language and the code while the manifest stays and an alias maps the old type name; shard type names and PersistenceIds never change.",
+          "codeTag": "ch20-s07",
+          "codeChange": "Rename the event record and related state/command names in Charging.Domain; keep manifest 'charging.connector-faulted.v1' mapped to the new type and add 'charging.connector-out-of-order.v1' for new writes with the old one still readable; update glossary; tests prove old journals replay."
+        },
+        {
+          "number": 8,
+          "title": "Owning the journal schema: migrations",
+          "summary": "Apply the published Akka.Persistence.Sql DDL plus read-model, outbox and billing schemas with a migrator (DbUp); autoInitialize false; a least-privilege database user; the AppHost waits for the migrator to complete.",
+          "codeTag": "ch20-s08",
+          "codeChange": "Add src/Ohmline.Migrator (console; dbup-postgresql 7.0.1; embedded scripts 0001_akka_journal.sql, 0002_akka_snapshot.sql, 0003_tags.sql, 0004_read_models.sql, 0005_billing.sql); Node, Billing and read models stop creating schema (autoInitialize: false, remove EnsureSchema); AppHost adds migrator and WaitForCompletion(migrator) for Node and Billing; integration tests run the migrator first."
+        },
+        {
+          "number": 9,
+          "title": "Rebuilding read models and versioning the Published Language",
+          "summary": "SessionHistoryV2 built side by side, projection version kept in the offset store, reads switched by configuration; SessionCompleted.v2 published alongside v1 and a consumer-driven contract test in Billing. This completes the rebuild preview of section 14.8; the same additive rules keep older builds of the driver app (Chapter 19) working against the client contracts.",
+          "codeTag": "ch20-s09",
+          "codeChange": "Add SessionHistoryV2Projection and table read_models.session_history_v2, projection id includes version; ReadModelOptions.SessionHistoryVersion switch; add SessionCompletedV2 to Contracts with 'ohmline.charging.session-completed.v2', relay writes both during transition; ContractTests updated."
+        },
+        {
+          "number": 10,
+          "title": "Retention, privacy and backups",
+          "summary": "Never delete events by default; retention rules if you must purge; no PII in events (TokenUid and DriverRef only) and crypto-shredding as a note; point-in-time recovery and restore drills that account for side effects outside the system.",
+          "codeTag": "ch20-s10",
+          "codeChange": "Add docs/runbooks/backup-restore.md and docs/runbooks/retention.md; add a test in ArchitectureTests that no event record has properties named like Email/Name/Phone."
+        }
+      ]
+    },
+    {
+      "number": 21,
+      "part": "Part VIII: Operations, Releases and Versioning",
+      "slug": "releasing-and-running-the-cluster",
+      "title": "Versioning, Releasing and Running the Cluster",
+      "wordTarget": 9000,
+      "summary": "Ships continuously without breaking a running cluster or its history: SemVer at three layers, MinVer and the Akka AppVersion trap, Conventional Commits and release-please, CI that builds every tag, SDK container images, Kubernetes topology for an Akka cluster, the anatomy of a rolling update, feature flags that never touch replay, blue/green done safely, release day end to end, and upgrading Akka.NET from 1.5 to 1.6.",
+      "researchFiles": [
+        "/home/jonathan/code/ddd-actors-dotnet/research/operations.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/akka-core.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/telemetry.md",
+        "/home/jonathan/code/ddd-actors-dotnet/research/testing.md"
+      ],
+      "sections": [
+        {
+          "number": 1,
+          "title": "SemVer at three layers",
+          "summary": "What a version means for services, for contract packages (package validation baselines) and for event and message manifests; a comparison table. Client contracts add a fourth audience: app builds in the store that the server must keep serving.",
+          "codeTag": "ch21-s01",
+          "codeChange": "Add docs/adr/0016-versioning-policy.md; enable EnablePackageValidation and IsPackable on Ohmline.Charging.Contracts, Ohmline.Charging.Client.Contracts and Ohmline.SharedKernel."
+        },
+        {
+          "number": 2,
+          "title": "Versions from git with MinVer, and the AppVersion trap",
+          "summary": "MinVer sets AssemblyVersion to {Major}.0.0.0, so Akka's app-version = assembly-version reports 1.0.0 for every 1.x; dotted pre-release versions make AppVersion throw; an MSBuild target feeds MAJOR.MINOR.PATCH to ClusterOptions.AppVersion.",
+          "codeTag": "ch21-s02",
+          "codeChange": "Add MinVer 8.0.0 (PrivateAssets all) via Directory.Build.props; Directory.Build.targets target after MinVer that writes AssemblyMetadata('OhmlineAppVersion', '$(MinVerMajor).$(MinVerMinor).$(MinVerPatch)'); Node/Gateway set ClusterOptions.AppVersion from it; AppVersionTests (parse succeeds, prerelease never reaches Akka). Create branch wrong/ch21-s02-minver-appversion."
+        },
+        {
+          "number": 3,
+          "title": "Conventional Commits and release-please",
+          "summary": "Conventional Commits from here on; release-please-action v5.0.0 with release-type simple; how the book's chNN-sMM history is bootstrapped.",
+          "codeTag": "ch21-s03",
+          "codeChange": "Add .github/workflows/release-please.yml, release-please-config.json (release-type simple, bootstrap-sha = this commit's parent), .release-please-manifest.json (0.9.0), docs/contributing.md (commit conventions)."
+        },
+        {
+          "number": 4,
+          "title": "CI that builds every tag",
+          "summary": "checkout v7 with fetch-depth 0; setup-dotnet v6.1.0 reading global.json; NuGet lock files and --locked-mode; dotnet test --solution with Testcontainers; a job that runs tools/verify-tags.sh.",
+          "codeTag": "ch21-s04",
+          "codeChange": "Enable RestorePackagesWithLockFile in Directory.Build.props and commit packages.lock.json files; add .github/workflows/ci.yml (build + unit + integration jobs; verify-tags job on workflow_dispatch and weekly schedule; vulnerability audit job running `dotnet list package --vulnerable`; an android job that installs the maui-android workload, runs -t:InstallAndroidDependencies and builds mobile/Ohmline.Mobile.slnx in --locked-mode)."
+        },
+        {
+          "number": 5,
+          "title": "Container images from the SDK",
+          "summary": "dotnet publish /t:PublishContainer; runtime/aspnet 11.0 base images; non-root UID 1654; image tags from MinVer, never latest.",
+          "codeTag": "ch21-s05",
+          "codeChange": "Add container properties (ContainerRepository ohmline/node, ohmline/gateway, ohmline/billing, ohmline/migrator; ContainerImageTags from MinVer via target; ContainerUser 1654) and a ci.yml job that publishes to ghcr.io on release."
+        },
+        {
+          "number": 6,
+          "title": "Kubernetes topology for an Akka cluster",
+          "summary": "A Deployment (not a StatefulSet) with maxSurge 1 / maxUnavailable 0; a headless service with publishNotReadyAddresses; Akka.Management cluster bootstrap with Kubernetes API discovery and RBAC; a lease-based split-brain resolver (CRD installed separately); probes, PodDisruptionBudget, a 35-second termination grace period; Kustomize overlays.",
+          "codeTag": "ch21-s06",
+          "codeChange": "Add Akka.Management, Akka.Discovery.KubernetesApi, Akka.Coordination.KubernetesApi to CPM; Node/Gateway: WithClusterBootstrap + WithKubernetesDiscovery + lease-majority SBR when OHMLINE_KUBERNETES=true; deploy/k8s/base (namespace, serviceaccount+role+rolebinding, node-deployment, node-headless-svc, node-svc, gateway-deployment, billing-deployment, migrator-job, pdb, configmap) and deploy/k8s/overlays/{dev,prod} (kustomization.yaml); validated with kubectl kustomize (and kind if available)."
+        },
+        {
+          "number": 7,
+          "title": "Anatomy of a rolling update",
+          "summary": "AppVersion steering new shards to new nodes, rebalancing while versions are mixed, the coordinated-shutdown time budget, what happens to messages that fail to deserialize on an old node, and draining OCPP connections with jitter to avoid reconnection storms.",
+          "codeTag": "ch21-s07",
+          "codeChange": "Gateway adds a CoordinatedShutdown task in phase service-unbind that closes WebSockets in batches with jittered delays (sends a reconnect hint); Node config sets coordinated-shutdown phase timeouts within the 35s budget; docs/runbooks/rolling-update.md; simulator gains a reconnect-storm scenario."
+        },
+        {
+          "number": 8,
+          "title": "Feature flags without breaking replay; blue/green done right",
+          "summary": "Microsoft.FeatureManagement 4.8.0 flags evaluated only in the shell and passed into Decide, never into Evolve or replay; the outcome recorded in the event (PricingModel); never run the same entities in two clusters. The sequence-number conflict of section 10.9 is what two writers look like in the journal.",
+          "codeTag": "ch21-s08",
+          "codeChange": "Add Microsoft.FeatureManagement.AspNetCore 4.8.0 to CPM; flag 'DynamicIdleFee' read in ChargingSessionActor and passed via DecisionContext.Features; SessionStarted gains PricingModel; tracing includes the Microsoft.FeatureManagement ActivitySource; add docs/runbooks/blue-green.md and docs/adr/0017-never-two-writers.md."
+        },
+        {
+          "number": 9,
+          "title": "Release day, end to end",
+          "summary": "A feat: commit, the release PR, tag v1.0.0, images, an overlay bump, a watched rollout with dashboards, rollback criteria.",
+          "codeTag": "ch21-s09",
+          "codeChange": "Commit a small `feat(charging): idle fee cap per tariff` change, merge-equivalent release commit updating CHANGELOG.md and .release-please-manifest.json to 1.0.0, annotated tag v1.0.0 in addition to ch21-s09, prod overlay image tag bump."
+        },
+        {
+          "number": 10,
+          "title": "Upgrading the platform: Akka.NET 1.5 to 1.6",
+          "summary": "On branch upgrade/akka-1.6: the one-line CPM bump (1.6 targets net10.0 and loads on net11.0); pinning serializer bindings because 1.6 changes what is written to the journal and the wire (rollback hazard); the new rebalance-absolute-limit default; TestKit lifecycle changes; Akka.Serialization.V2 with C# 15 union fields; why the new remoting transport means blue/green.",
+          "codeTag": "ch21-s10",
+          "codeChange": "On branch upgrade/akka-1.6 created from ch21-s09: AkkaVersion=1.6.0-beta5 in Directory.Packages.props; explicit serialization-bindings config keeping 1.5 behavior; rebalance-absolute-limit set explicitly; TestKit override fixes; a demonstration message with a C# 15 union field serialized via Akka.Serialization.V2 with a round-trip test; docs/upgrade-akka-1.6.md. Tag ch21-s10 lives on this branch only."
+        }
+      ]
+    }
+  ]
+}

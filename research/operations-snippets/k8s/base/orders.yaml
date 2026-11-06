@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orders-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["akka.io"]            # Akka.Coordination.KubernetesApi lease CRD (lease-majority SBR)
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orders-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: orders
+roleRef:
+  kind: Role
+  name: orders-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-akka
+spec:
+  clusterIP: None                     # headless: discovery only
+  publishNotReadyAddresses: true      # bootstrap must see pods before they are Ready
+  selector:
+    app: orders
+  ports:
+    - { name: management, port: 8558 }
+    - { name: akka-remote, port: 5055 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-http
+spec:
+  selector:
+    app: orders
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  labels:
+    app: orders
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                     # new pod joins before an old one leaves
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      serviceAccountName: orders
+      terminationGracePeriodSeconds: 35
+      containers:
+        - name: orders
+          image: ghcr.io/example/orders:1.5.0
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: Akka__AppVersion
+              value: "1.5.0"          # MAJOR.MINOR.PATCH, kept in lock-step with the image tag
+            - name: ConnectionStrings__journal
+              valueFrom:
+                secretKeyRef:
+                  name: orders-db
+                  key: connection-string
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 8558 }
+            - { name: akka-remote, containerPort: 5055 }
+          livenessProbe:
+            httpGet: { path: /healthz/live, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz/ready, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { memory: 2Gi }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orders
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: orders

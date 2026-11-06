@@ -1,0 +1,3 @@
+[submodule "sample"]
+	path = sample
+	url = git@github.com:snow-jallen/ddd-actors-dotnet-sample.git

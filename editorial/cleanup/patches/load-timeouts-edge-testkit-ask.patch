@@ -1,0 +1,32 @@
+diff --git a/tests/Ohmline.Charging.Api.Tests/ChargePointEndpointsTests.cs b/tests/Ohmline.Charging.Api.Tests/ChargePointEndpointsTests.cs
+index e53b726..d3c7175 100644
+--- a/tests/Ohmline.Charging.Api.Tests/ChargePointEndpointsTests.cs
++++ b/tests/Ohmline.Charging.Api.Tests/ChargePointEndpointsTests.cs
+@@ -89,7 +89,7 @@ public sealed class ChargePointEndpointsTests(ITestOutputHelper output) : EdgeTe
+             Registration, RegionOf<ChargePointRegion>(CreateTestProbe()), Clock, Options, Ct);
+ 
+         Problem(answer.Result, StatusCodes.Status504GatewayTimeout).ProblemDetails.Detail
+-            .ShouldBe("No answer within 0.5 s. The command may still have been carried out.");
++            .ShouldBe("No answer within 3 s. The command may still have been carried out.");
+     }
+ 
+     [Fact]
+diff --git a/tests/Ohmline.Charging.Api.Tests/EdgeTestKit.cs b/tests/Ohmline.Charging.Api.Tests/EdgeTestKit.cs
+index ab7d8d8..1a4c2f7 100644
+--- a/tests/Ohmline.Charging.Api.Tests/EdgeTestKit.cs
++++ b/tests/Ohmline.Charging.Api.Tests/EdgeTestKit.cs
+@@ -25,9 +25,13 @@ public abstract class EdgeTestKit(ITestOutputHelper output)
+ 
+     protected FakeTimeProvider Clock { get; } = new(Morning);
+ 
++    /// <summary>
++    /// Three seconds: long enough for a probe's answer on a machine running the whole suite,
++    /// and only the test that waits for a 504 waits for it.
++    /// </summary>
+     protected static IOptions<ChargingApiOptions> Options { get; } =
+         Microsoft.Extensions.Options.Options.Create(
+-            new ChargingApiOptions { AskTimeout = TimeSpan.FromMilliseconds(500) });
++            new ChargingApiOptions { AskTimeout = TimeSpan.FromSeconds(3) });
+ 
+     protected static IRequiredActor<TKey> RegionOf<TKey>(TestProbe probe) =>
+         new Region<TKey>(probe.Ref);

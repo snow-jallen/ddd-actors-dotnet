@@ -1,0 +1,26 @@
+diff --git a/tests/Ohmline.Charging.Actors.Tests/JournalTour/TwoIncarnationsTests.cs b/tests/Ohmline.Charging.Actors.Tests/JournalTour/TwoIncarnationsTests.cs
+index c3f0540..e336ca7 100644
+--- a/tests/Ohmline.Charging.Actors.Tests/JournalTour/TwoIncarnationsTests.cs
++++ b/tests/Ohmline.Charging.Actors.Tests/JournalTour/TwoIncarnationsTests.cs
+@@ -9,6 +9,7 @@ using Ohmline.Charging.Actors.Tests.Sqlite;
+ using Ohmline.Charging.Contracts;
+ using Ohmline.Charging.Contracts.ChargePoints;
+ using static Ohmline.Charging.Actors.Tests.Known;
++using Ohmline.Testing;
+ 
+ namespace Ohmline.Charging.Actors.Tests.JournalTour;
+ 
+@@ -20,7 +21,12 @@ namespace Ohmline.Charging.Actors.Tests.JournalTour;
+ /// </summary>
+ public sealed class TwoIncarnationsTests(ITestOutputHelper output)
+ {
+-    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(5);
++    /// <summary>
++    /// The first answer waits for the node to start on its SQLite file, which takes seconds
++    /// when every test assembly runs at once.
++    /// </summary>
++    private static readonly TimeSpan AskTimeout =
++        TimeSpan.FromSeconds(20 * ActorTestConfig.TimeFactor);
+ 
+     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+ 

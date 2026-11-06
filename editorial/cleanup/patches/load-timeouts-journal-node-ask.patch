@@ -1,0 +1,26 @@
+diff --git a/tests/Ohmline.Charging.ReadModels.Tests/JournalNode.cs b/tests/Ohmline.Charging.ReadModels.Tests/JournalNode.cs
+index 32ddad7..2d2ce61 100644
+--- a/tests/Ohmline.Charging.ReadModels.Tests/JournalNode.cs
++++ b/tests/Ohmline.Charging.ReadModels.Tests/JournalNode.cs
+@@ -11,6 +11,7 @@ using Microsoft.Extensions.Hosting;
+ using Microsoft.Extensions.Logging;
+ using Ohmline.ActorShell.Clustering;
+ using Ohmline.Charging.Actors;
++using Ohmline.Testing;
+ 
+ namespace Ohmline.Charging.ReadModels.Tests;
+ 
+@@ -21,7 +22,12 @@ namespace Ohmline.Charging.ReadModels.Tests;
+ /// </summary>
+ internal sealed class JournalNode : IAsyncDisposable
+ {
+-    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(5);
++    /// <summary>
++    /// A node on a SQLite file creates its tables and forms its cluster before the first answer,
++    /// which takes seconds when every test assembly runs at once.
++    /// </summary>
++    private static readonly TimeSpan AskTimeout =
++        TimeSpan.FromSeconds(20 * ActorTestConfig.TimeFactor);
+ 
+     private readonly IHost _host;
+ 

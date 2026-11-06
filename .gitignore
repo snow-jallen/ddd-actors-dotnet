@@ -1,0 +1,13 @@
+# Local toolchains (installed by tools/dotnet-install.sh / the MAUI dependency step)
+/.dotnet/
+/.android-sdk/
+/.jdk/
+/.scratch/
+# Generated book outputs (tools/build-book.sh)
+/build/
+# Research spikes' build output
+bin/
+obj/
+TestResults/
+# Backup bundle of the sample's pre-cleanup history (kept locally only)
+/editorial/cleanup/*.bundle

@@ -1,0 +1,17 @@
+diff --git a/mobile/Directory.Build.props b/mobile/Directory.Build.props
+index d1217fe..f61c79c 100644
+--- a/mobile/Directory.Build.props
++++ b/mobile/Directory.Build.props
+@@ -8,5 +8,12 @@
+   <PropertyGroup>
+     <!-- The root sets net11.0 for every project; the head sets its own TargetFrameworks. -->
+     <TargetFramework></TargetFramework>
++    <!--
++      MAUI 11 rc.2's XAML incremental hot reload (on by default in Debug) generates
++      AppShell.xaml.uc.xsg.cs from what the shared compiler server last built at this path. After
++      a checkout of another tag changes AppShell.xaml, that code assigns the read-only
++      Shell.Items and the build fails with CS0200. Classic XAML hot reload still works.
++    -->
++    <EnableMauiIncrementalHotReload>false</EnableMauiIncrementalHotReload>
+   </PropertyGroup>
+ </Project>

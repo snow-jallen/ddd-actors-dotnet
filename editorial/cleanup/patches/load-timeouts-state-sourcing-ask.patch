@@ -1,0 +1,18 @@
+diff --git a/tests/Ohmline.Charging.Actors.Tests/JournalTour/StateSourcingTourTests.cs b/tests/Ohmline.Charging.Actors.Tests/JournalTour/StateSourcingTourTests.cs
+index 962789b..5584438 100644
+--- a/tests/Ohmline.Charging.Actors.Tests/JournalTour/StateSourcingTourTests.cs
++++ b/tests/Ohmline.Charging.Actors.Tests/JournalTour/StateSourcingTourTests.cs
+@@ -20,7 +20,12 @@ namespace Ohmline.Charging.Actors.Tests.JournalTour;
+ /// </summary>
+ public sealed class StateSourcingTourTests(ITestOutputHelper output)
+ {
+-    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(5);
++    /// <summary>
++    /// The first answer waits for the node to start on its SQLite file, which takes seconds
++    /// when every test assembly runs at once.
++    /// </summary>
++    private static readonly TimeSpan AskTimeout =
++        TimeSpan.FromSeconds(20 * ActorTestConfig.TimeFactor);
+ 
+     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+ 

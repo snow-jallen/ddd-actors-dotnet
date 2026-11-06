@@ -1,0 +1,59 @@
+[
+ {
+  "id": "00-front-matter-01",
+  "section": "Title page (front-matter notes)",
+  "kind": "claim",
+  "text": "The charger protocol is a simplified subset in the style of OCPP 1.6J and makes no claim of conformance to any OCPP version.",
+  "author": "Open Charge Alliance",
+  "title": "Open Charge Point Protocol (OCPP)",
+  "edition": "OCPP 1.6 (2015)",
+  "url": "https://openchargealliance.org/protocols/open-charge-point-protocol/",
+  "locator": "OCPP protocol overview page, 'Explore OCPP 1.6'",
+  "verification": "Fetched the official OCA protocol page with curl (HTTP 200) and extracted its text.",
+  "evidence": "At the moment there are three versions of OCPP available. OCPP 1.6 was released in 2015.",
+  "action": "linked"
+ },
+ {
+  "id": "00-front-matter-02",
+  "section": "Preface / Who this book is for",
+  "kind": "claim",
+  "text": "You have heard of DDD, perhaps read part of Evans's book, ...",
+  "author": "Eric Evans",
+  "title": "Domain-Driven Design: Tackling Complexity in the Heart of Software",
+  "edition": "1st edition, Addison-Wesley Professional, 2003 (ISBN 9780321125217)",
+  "url": "https://www.informit.com/store/domain-driven-design-tackling-complexity-in-the-heart-9780321125217",
+  "locator": "Whole book (general reference)",
+  "verification": "Fetched the InformIT (Pearson/Addison-Wesley) store page and confirmed the title, the author, the publisher and the TOC. Also fetched https://www.domainlanguage.com/ddd/, the author's page.",
+  "evidence": "Domain-Driven Design: Tackling Complexity in the Heart of Software; Eric Evans; Addison-Wesley Professional; published Aug 20, 2003",
+  "action": "linked"
+ },
+ {
+  "id": "00-front-matter-03",
+  "section": "Conventions used in this book",
+  "kind": "claim",
+  "text": "A block that starts with // Illustration (not in the sample) shows a deliberately non-Ohmline example, such as Evans's cargo shipping domain (Domain-Driven Design, ch. 7 \"Using the Language: An Extended Example\") or a two-line syntax reminder.",
+  "author": "Eric Evans",
+  "title": "Domain-Driven Design: Tackling Complexity in the Heart of Software",
+  "edition": "1st edition, Addison-Wesley Professional, 2003 (ISBN 9780321125217)",
+  "url": "https://www.informit.com/store/domain-driven-design-tackling-complexity-in-the-heart-9780321125217",
+  "locator": "ch. 7 \"Using the Language: An Extended Example\", section \"Introducing the Cargo Shipping System\"",
+  "verification": "Read the TOC on the InformIT store page.",
+  "evidence": "7. Using the Language: An Extended Example. / Introducing the Cargo Shipping System.",
+  "action": "linked",
+  "notes": "2026-11-06: text field regenerated from the current book wording."
+ },
+ {
+  "id": "00-front-matter-04",
+  "section": "Setting up your machine / Aspire (from Chapter 12)",
+  "kind": "claim",
+  "text": "Install it with the instructions at https://aspire.dev.",
+  "author": "Microsoft (Aspire team)",
+  "title": "Aspire",
+  "edition": "website, accessed 2026-11-06",
+  "url": "https://aspire.dev",
+  "locator": "Home page",
+  "verification": "Fetched the page, which is the official Aspire site (credits Microsoft and links github.com/microsoft/aspire).",
+  "evidence": "Install the Aspire CLI, start with an existing repository or a new one.",
+  "action": "linked"
+ }
+]

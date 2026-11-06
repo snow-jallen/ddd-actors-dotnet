@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orders-prod
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/example/orders
+    newTag: "1.6.0"                     # CI bumps this line (kustomize edit set image ...)
+patches:
+  - target: { kind: Deployment, name: orders }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 5
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/value
+        value: "1.6.0"

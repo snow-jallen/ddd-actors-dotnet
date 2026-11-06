@@ -1,0 +1,30 @@
+diff --git a/README.md b/README.md
+index a215a5c..be47fce 100644
+--- a/README.md
++++ b/README.md
+@@ -61,6 +61,10 @@ tools/verify-tags.sh                    # build and test every tag in a temporar
+ empty and the two `dotnet` commands fail with "Unable to find a project to restore!";
+ `tools/verify-tags.sh` reports those tags as skipped.
+ 
++The Chapter 1 tags (`ch01-s02` to `ch01-s07`) hold documents and setup only, so they are exempt
++from the build-and-test check. From `ch02-s01` on, every tag must build with `-warnaserror`, pass
++all of its tests and leave no files behind, and `tools/verify-tags.sh` fails any tag that does not.
++
+ ## Side branches
+ 
+ Later chapters add branches next to `main`. None of them is ever merged.
+diff --git a/tools/verify-tags.sh b/tools/verify-tags.sh
+index 40ec7c3..d21285a 100755
+--- a/tools/verify-tags.sh
++++ b/tools/verify-tags.sh
+@@ -9,7 +9,9 @@
+ #   dotnet build Ohmline.slnx -warnaserror
+ #   dotnet test --solution Ohmline.slnx
+ # and then fails the tag if the build or the tests left untracked or modified files.
+-# Tags whose Ohmline.slnx is missing or lists no projects yet are reported as skipped.
++# Tags whose Ohmline.slnx is missing or lists no projects yet are reported as skipped: these are
++# the Chapter 1 tags (ch01-s02 to ch01-s07), which hold documents and setup only and are exempt
++# from the build-and-test check. Every tag from ch02-s01 on has projects and must pass.
+ #
+ # Tests that start containers need Podman or Docker. With rootless Podman, first run:
+ #   export DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock

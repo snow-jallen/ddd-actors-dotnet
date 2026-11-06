@@ -1,0 +1,13 @@
+diff --git a/tests/Ohmline.DriverAccounts.Api.Tests/DriverAccountsEndpointsTests.cs b/tests/Ohmline.DriverAccounts.Api.Tests/DriverAccountsEndpointsTests.cs
+index 782ce6d..5087a7e 100644
+--- a/tests/Ohmline.DriverAccounts.Api.Tests/DriverAccountsEndpointsTests.cs
++++ b/tests/Ohmline.DriverAccounts.Api.Tests/DriverAccountsEndpointsTests.cs
+@@ -24,7 +24,7 @@ public sealed class DriverAccountsEndpointsTests(ITestOutputHelper output)
+ 
+     private static readonly IOptions<DriverAccountsApiOptions> Options =
+         Microsoft.Extensions.Options.Options.Create(
+-            new DriverAccountsApiOptions { AskTimeout = TimeSpan.FromMilliseconds(500) });
++            new DriverAccountsApiOptions { AskTimeout = TimeSpan.FromSeconds(3) });
+ 
+     private readonly FakeTimeProvider _clock =
+         new(new DateTimeOffset(2026, 11, 4, 14, 40, 0, TimeSpan.Zero));

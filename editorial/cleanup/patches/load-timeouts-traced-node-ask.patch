@@ -1,0 +1,16 @@
+diff --git a/tests/Ohmline.Telemetry.Tests/TracedNode.cs b/tests/Ohmline.Telemetry.Tests/TracedNode.cs
+index 1a4055c..b19f348 100644
+--- a/tests/Ohmline.Telemetry.Tests/TracedNode.cs
++++ b/tests/Ohmline.Telemetry.Tests/TracedNode.cs
+@@ -26,6 +26,11 @@ public sealed class TracedNode(PostgresFixture postgres) : WebApplicationFactory
+             .UseEnvironment("Development")
+             .UseSetting("ConnectionStrings:ohmline", postgres.ConnectionString)
+             .UseSetting("Akka:Remote:Port", "0")
++            // A node that has just started is slow over its first commands while every test
++            // assembly runs at once: more than production's 5 s before the edge gives up.
++            .UseSetting("Ohmline:Charging:AskTimeout", "00:00:20")
++            .UseSetting("Ohmline:SiteEnergy:AskTimeout", "00:00:20")
++            .UseSetting("Ohmline:DriverAccounts:AskTimeout", "00:00:20")
+             .ConfigureTestServices(services => services
+                 .AddSingleton<IPaymentPort, InMemoryPaymentPort>()
+                 .AddSingleton<IChargerCommandPort, LoggingChargerCommandPort>()

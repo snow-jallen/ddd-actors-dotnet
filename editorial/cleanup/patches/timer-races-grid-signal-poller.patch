@@ -1,0 +1,33 @@
+diff --git a/tests/Ohmline.SiteEnergy.Acl.GridOperator.Tests/GridSignalPollerTests.cs b/tests/Ohmline.SiteEnergy.Acl.GridOperator.Tests/GridSignalPollerTests.cs
+index 0166cad..83807e1 100644
+--- a/tests/Ohmline.SiteEnergy.Acl.GridOperator.Tests/GridSignalPollerTests.cs
++++ b/tests/Ohmline.SiteEnergy.Acl.GridOperator.Tests/GridSignalPollerTests.cs
+@@ -59,7 +59,7 @@ public sealed class GridSignalPollerTests(ITestOutputHelper output)
+     {
+         var feed = new Feed(Event(-60m));
+         var budgets = CreateTestProbe();
+-        Poller(feed, budgets);
++        Poller(feed, budgets, askTimeout: TimeSpan.FromMilliseconds(500));
+ 
+         var first = await budgets.ExpectMsgAsync<ApplyCurtailment>(cancellationToken: Ct);
+         var again = await budgets.ExpectMsgAsync<ApplyCurtailment>(
+@@ -79,13 +79,17 @@ public sealed class GridSignalPollerTests(ITestOutputHelper output)
+         return budgets;
+     }
+ 
+-    private void Poller(Feed feed, TestProbe budgets)
++    /// <summary>
++    /// The poller, asking every 100 ms. A budget that answers is given time to, however busy the
++    /// machine: an answer that comes too late is no answer, and the site would be told again.
++    /// </summary>
++    private void Poller(Feed feed, TestProbe budgets, TimeSpan? askTimeout = null)
+     {
+         var options = Options.Create(new GridOperatorOptions
+         {
+             Enabled = true,
+             PollInterval = TimeSpan.FromMilliseconds(100),
+-            AskTimeout = TimeSpan.FromMilliseconds(500),
++            AskTimeout = askTimeout ?? Dilated(TimeSpan.FromSeconds(3)),
+             Sites = new() { ["NG-VEN-0042"] = "slc-depot" },
+         });
+         Sys.ActorOf(Props.Create(() => new GridSignalPoller(

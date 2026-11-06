@@ -1,0 +1,23 @@
+diff --git a/tests/Ohmline.Telemetry.Tests/LinkTests.cs b/tests/Ohmline.Telemetry.Tests/LinkTests.cs
+index 6a225e4..bba3689 100644
+--- a/tests/Ohmline.Telemetry.Tests/LinkTests.cs
++++ b/tests/Ohmline.Telemetry.Tests/LinkTests.cs
+@@ -24,6 +24,7 @@ public sealed class LinkTests(ITestOutputHelper output)
+         using var recorder = new SpanRecorder(Source.Name, ActorShellDiagnostics.Name);
+         var alarm = Sys.ActorOf(Props.Create(() => new Alarm(TestActor)), "alarm");
+         await alarm.Ask<Armed>(new Arm(), RemainingOrDefault, Ct); // Recovered, untraced.
++        await ExpectMsgAsync<Rang>(cancellationToken: Ct); // Its ring: no stale one is left.
+         using var request = Source.StartActivity("POST /alarms")!;
+ 
+         alarm.TellTraced(new Arm(), TestActor);
+@@ -31,7 +32,9 @@ public sealed class LinkTests(ITestOutputHelper output)
+         await ExpectMsgAsync<Armed>(cancellationToken: Ct);
+         var rang = await ExpectMsgAsync<Rang>(cancellationToken: Ct);
+         var arm = await recorder.SingleAsync(request.TraceId, ActorShellDiagnostics.Name);
+-        var ring = recorder.All.Single(span => span.Id == rang.ActivityId);
++        var ring = await recorder.SingleAsync(
++            ActivityContext.Parse(rang.ActivityId!, null).TraceId, ActorShellDiagnostics.Name);
++        ring.Id.ShouldBe(rang.ActivityId);
+         ring.TraceId.ShouldNotBe(request.TraceId);
+         ring.ParentSpanId.ShouldBe(default);
+         ring.Links.ShouldHaveSingleItem().Context.SpanId.ShouldBe(arm.SpanId);

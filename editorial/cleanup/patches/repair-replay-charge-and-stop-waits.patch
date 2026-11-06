@@ -1,0 +1,26 @@
+diff --git a/tests/Ohmline.IntegrationTests/ReplayTests.cs b/tests/Ohmline.IntegrationTests/ReplayTests.cs
+index 99680de..5d6be18 100644
+--- a/tests/Ohmline.IntegrationTests/ReplayTests.cs
++++ b/tests/Ohmline.IntegrationTests/ReplayTests.cs
+@@ -28,6 +28,12 @@ public sealed class ReplayTests(PostgresFixture postgres)
+         await using (var node = new OhmlineNode(postgres))
+         {
+             await ChargeAndStopAsync(node.CreateClient(), chargePoint, session);
++            // Each read model is a stream of its own, and on a node that has just started they
++            // may all still be starting: longer than read-your-writes waits.
++            await EventuallyAsync(database, $"""
++                SELECT count(*) FROM read_models.session_history
++                WHERE session_id = '{session}' AND status = 'ended'
++                """);
+             await EventuallyAsync(database, $"""
+                 SELECT count(*) FROM read_models.driver_app_cards
+                 WHERE session_id = '{session}' AND version = 3
+@@ -88,7 +94,7 @@ public sealed class ReplayTests(PostgresFixture postgres)
+                 $"/sessions/{session}/meter-values", Sessions.Reading(1_207_350), Ct))
+             .EnsureSuccessStatusCode();
+         var stopped = await http.PostAsync($"/sessions/{session}/stop", content: null, Ct);
+-        (await http.GetAsync(stopped.Headers.Location, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
++        stopped.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+     }
+ 
+     /// <summary>The test's rows in all three read models, as JSON, and its feed's length.</summary>

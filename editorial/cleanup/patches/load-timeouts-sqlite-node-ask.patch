@@ -1,0 +1,26 @@
+diff --git a/tests/Ohmline.Charging.Actors.Tests/Sqlite/SqliteNode.cs b/tests/Ohmline.Charging.Actors.Tests/Sqlite/SqliteNode.cs
+index 094719f..10784c5 100644
+--- a/tests/Ohmline.Charging.Actors.Tests/Sqlite/SqliteNode.cs
++++ b/tests/Ohmline.Charging.Actors.Tests/Sqlite/SqliteNode.cs
+@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Hosting;
+ using Microsoft.Extensions.Logging;
+ using Ohmline.Charging.Actors.ChargePoints;
++using Ohmline.Testing;
+ 
+ namespace Ohmline.Charging.Actors.Tests.Sqlite;
+ 
+@@ -17,7 +18,12 @@ namespace Ohmline.Charging.Actors.Tests.Sqlite;
+ /// </summary>
+ internal sealed class SqliteNode : IAsyncDisposable
+ {
+-    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(5);
++    /// <summary>
++    /// The first answer waits for the node to start on its SQLite file, which takes seconds
++    /// when every test assembly runs at once.
++    /// </summary>
++    private static readonly TimeSpan AskTimeout =
++        TimeSpan.FromSeconds(20 * ActorTestConfig.TimeFactor);
+ 
+     private readonly IHost _host;
+ 

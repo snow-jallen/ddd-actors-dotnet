@@ -1,0 +1,37 @@
+diff --git a/tests/Ohmline.Telemetry.Tests/TraceShapeTests.cs b/tests/Ohmline.Telemetry.Tests/TraceShapeTests.cs
+index faa5455..ace8ada 100644
+--- a/tests/Ohmline.Telemetry.Tests/TraceShapeTests.cs
++++ b/tests/Ohmline.Telemetry.Tests/TraceShapeTests.cs
+@@ -116,7 +116,7 @@ public sealed class TraceShapeTests(PostgresFixture postgres)
+         while (true)
+         {
+             var spans = node.Exported.Where(span => span.TraceId == trace).ToList();
+-            if (spans.Any(span => span.DisplayName == last) || DateTimeOffset.UtcNow > deadline)
++            if (EndedWithItsAncestors(spans, last) || DateTimeOffset.UtcNow > deadline)
+             {
+                 spans.ShouldContain(span => span.DisplayName == last);
+                 return spans;
+@@ -126,6 +126,23 @@ public sealed class TraceShapeTests(PostgresFixture postgres)
+         }
+     }
+ 
++    /// <summary>
++    /// Whether the span named <paramref name="last"/> and every span above it, up to the request
++    /// or the trace's root, have ended. A parent can end after its child: a span that tells
++    /// another actor ends when its handler returns, and that actor may already be done.
++    /// </summary>
++    private static bool EndedWithItsAncestors(List<Activity> spans, string last)
++    {
++        var current = spans.FirstOrDefault(span => span.DisplayName == last);
++        while (current is { Kind: not ActivityKind.Server } && current.ParentSpanId != default)
++        {
++            var parent = current.ParentSpanId;
++            current = spans.FirstOrDefault(span => span.SpanId == parent);
++        }
++
++        return current is not null;
++    }
++
+     /// <summary>The first exported span with a link to <paramref name="span"/>.</summary>
+     private static async Task<Activity> LinkedAsync(TracedNode node, Activity span)
+     {

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType><IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Verify/Domain.cs;../Verify/OrderActor.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Akka.Hosting.TestKit" Version="1.5.73" />
+    <PackageReference Include="Akka.Cluster.Sharding" Version="1.5.73" />
+    <PackageReference Include="Akka.Persistence.TestKit.Xunit" Version="1.5.73" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+  </ItemGroup>
+</Project>
