@@ -27,18 +27,23 @@ This book is that system. You take **one** realistic business, **Ohmline**, a ne
 
 ## One system, every topic, in context
 
-The topics below usually live in separate books, talks and blog posts. Here, each one hands its result to the next:
+The topics below usually live in separate books, talks and blog posts. Here, each one hands its result to the next, in three stages:
 
 ```mermaid
-flowchart LR
-  A["Discover the domain<br/>EventStorming, ubiquitous language"] --> B["Draw the boundaries<br/>bounded contexts, context maps"]
-  B --> C["Model the rules<br/>value objects, aggregates, deciders"]
-  C --> D["Give them a runtime<br/>actors, persistence, sharding"]
-  D --> E["Answer the questions<br/>CQRS, projections, read models"]
-  E --> F["Run the long processes<br/>sagas, outbox, anticorruption layers"]
-  F --> G["See inside<br/>OpenTelemetry through the mailbox"]
-  G --> H["Reach the edge<br/>offline-first .NET MAUI app"]
-  H --> I["Ship and evolve<br/>schema versioning, rolling upgrades"]
+flowchart TB
+  subgraph model["Model it"]
+    direction LR
+    A["Discover the domain<br/>EventStorming, ubiquitous language<br/>Ch. 4"] --> B["Draw the boundaries<br/>bounded contexts, context maps<br/>Ch. 5"] --> C["Model the rules<br/>value objects, aggregates, deciders<br/>Ch. 6–9"]
+  end
+  subgraph build["Build it"]
+    direction LR
+    D["Give the rules a runtime<br/>actors, persistence, sharding<br/>Ch. 10–12"] --> E["Answer the questions<br/>CQRS, projections, read models<br/>Ch. 13–14"] --> F["Run the long processes<br/>sagas, outbox, anticorruption layers<br/>Ch. 15–16"]
+  end
+  subgraph run["Run it"]
+    direction LR
+    G["See inside<br/>OpenTelemetry through the mailbox<br/>Ch. 17–18"] --> H["Reach the edge<br/>offline-first .NET MAUI app<br/>Ch. 19"] --> I["Ship and evolve<br/>schema versioning, rolling upgrades<br/>Ch. 20–21"]
+  end
+  model --> build --> run
 ```
 
 What that buys you:
@@ -152,4 +157,10 @@ The verification records are in `editorial/`, so you can see what was checked an
 
 ## License
 
-The Ohmline sample code is released under the [MIT License](https://github.com/snow-jallen/ddd-actors-dotnet-sample/blob/main/LICENSE). Ohmline, TallyPay, Northgate Grid and AssetTrack are fictional companies.
+<a rel="license" href="https://creativecommons.org/licenses/by-nc-sa/4.0/"><img alt="Creative Commons License CC BY-NC-SA 4.0" src="https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png"></a>
+
+The book (the text in `book/`, its diagrams and the cover) is © 2026 Jonathan Allen and licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-nc-sa/4.0/) (see [`LICENSE`](LICENSE)). You may share and adapt it for non-commercial purposes, as long as you give credit and release your adaptations under the same license.
+
+The code is MIT-licensed so you can use it anywhere, including at work. That covers the [Ohmline sample](https://github.com/snow-jallen/ddd-actors-dotnet-sample/blob/main/LICENSE) and the build scripts in [`tools/`](tools/LICENSE).
+
+Ohmline, TallyPay, Northgate Grid and AssetTrack are fictional companies.

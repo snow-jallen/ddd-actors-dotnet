@@ -6,6 +6,8 @@
 
 *Verified against the .NET 11 SDK 11.0.100-rc.3, C# 15 and Akka.NET 1.5.73. The companion sample repo, `Ohmline`, ships alongside the manuscript in the `sample/` folder.*
 
+*© 2026 Jonathan Allen. This book is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-nc-sa/4.0/). The companion sample code is licensed under the MIT License.*
+
 *Every company in this book is fictional: Ohmline, TallyPay, Northgate Grid and AssetTrack. The charger protocol is a simplified subset in the style of [OCPP 1.6J](https://openchargealliance.org/protocols/open-charge-point-protocol/) and makes no claim of conformance to any OCPP version.*
 
 # Preface
