@@ -1,0 +1,134 @@
+name: Build the book
+
+# Every push and pull request builds the PDF, EPUB and HTML editions and a zip of the Ohmline
+# sample (full history, every branch and section tag) and uploads them as workflow artifacts.
+# Pushes to main also refresh the "Latest build" prerelease; pushing a v* tag publishes a
+# versioned release with the same files.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: book-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PANDOC_VERSION: "3.7.0.2"
+  BOOK_SLUG: ddd-actor-model-dotnet
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the book and the sample submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Install pandoc, fonts and PDF tooling
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            fonts-inter fonts-jetbrains-mono fonts-noto-core poppler-utils zip
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+          pandoc --version | head -1
+          google-chrome --version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pypdf (joins the cover page and keeps the PDF outline)
+        run: python -m pip install --quiet "pypdf>=5"
+
+      - name: Build Markdown, HTML, EPUB and PDF
+        env:
+          BOOK_PDF_EXTRA_FLAGS: --no-sandbox
+        run: tools/build-book.sh
+
+      - name: Check the PDF
+        run: |
+          pdfinfo build/book.pdf | grep -E "Pages|Page size"
+          if pdftotext build/book.pdf - | grep -q "DIAGRAM-ERROR"; then
+            echo "::error::A Mermaid diagram failed to render; search the PDF for DIAGRAM-ERROR"
+            exit 1
+          fi
+
+      - name: Package the Ohmline sample (full history, all branches and tags)
+        run: |
+          url="$(git config -f .gitmodules submodule.sample.url)"
+          git clone --quiet "$url" "$RUNNER_TEMP/ohmline-sample"
+          cd "$RUNNER_TEMP/ohmline-sample"
+          for branch in $(git for-each-ref --format='%(refname:lstrip=3)' refs/remotes/origin); do
+            [ "$branch" = "HEAD" ] && continue
+            git show-ref --quiet --verify "refs/heads/$branch" || git branch --quiet --track "$branch" "origin/$branch"
+          done
+          git checkout --quiet main
+          echo "branches: $(git branch | wc -l), tags: $(git tag | wc -l)"
+          cd "$RUNNER_TEMP"
+          zip -qr "$GITHUB_WORKSPACE/build/ohmline-sample.zip" ohmline-sample
+
+      - name: Name the release files
+        run: |
+          mkdir -p dist
+          cp build/book.pdf  "dist/${BOOK_SLUG}.pdf"
+          cp build/book.epub "dist/${BOOK_SLUG}.epub"
+          cp build/book.html "dist/${BOOK_SLUG}.html"
+          cp build/book.md   "dist/${BOOK_SLUG}.md"
+          cp build/ohmline-sample.zip dist/ohmline-sample.zip
+          cp book/images/cover.png dist/cover.png
+          ls -la dist
+          {
+            echo "## Domain-Driven Design with the Actor Model on .NET"
+            echo
+            echo "Built from \`${GITHUB_SHA::7}\` on $(date -u +%Y-%m-%d)."
+            echo
+            echo "| File | What it is |"
+            echo "|---|---|"
+            echo "| \`${BOOK_SLUG}.pdf\` | The book, $(pdfinfo build/book.pdf | awk '/^Pages/ {print $2}') pages, 7 × 9.25 in, with a clickable outline |"
+            echo "| \`${BOOK_SLUG}.epub\` | The book for e-readers |"
+            echo "| \`${BOOK_SLUG}.html\` | The book as one web page, with rendered diagrams |"
+            echo "| \`${BOOK_SLUG}.md\` | The whole manuscript as one Markdown file |"
+            echo "| \`ohmline-sample.zip\` | The Ohmline sample repository: full history, every \`chNN-sMM\` section tag and every side branch |"
+            echo
+            echo "Start with \`git tag -n --sort=version:refname\` inside the sample, then \`git checkout ch01-s07\`."
+          } > dist/RELEASE_NOTES.md
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BOOK_SLUG }}-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish the versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --verify-tag --title "Edition ${tag}" --notes-file dist/RELEASE_NOTES.md
+          fi
+          gh release upload "$tag" --clobber dist/${BOOK_SLUG}.* dist/ohmline-sample.zip dist/cover.png
+
+      - name: Refresh the "Latest build" prerelease
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-build --cleanup-tag --yes >/dev/null 2>&1 || true
+          gh release create latest-build --target "$GITHUB_SHA" --prerelease \
+            --title "Latest build (main)" --notes-file dist/RELEASE_NOTES.md \
+            dist/${BOOK_SLUG}.* dist/ohmline-sample.zip dist/cover.png
